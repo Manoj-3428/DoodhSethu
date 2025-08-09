@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "987477998842",
+    "project_id": "doodhsetu-af429",
+    "storage_bucket": "doodhsetu-af429.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:987477998842:android:04491e8410de72ef719d43",
+        "android_client_info": {
+          "package_name": "com.example.doodhsethu"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyArMqa25F2rVzISIUJerJitqz_-smJicF4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

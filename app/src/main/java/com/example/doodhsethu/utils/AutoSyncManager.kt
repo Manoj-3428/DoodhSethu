@@ -37,22 +37,30 @@ class AutoSyncManager(private val context: Context) {
             try {
                 Log.d("AutoSyncManager", "Starting auto sync process")
                 
+                // Clean up duplicate collections first
+                try {
+                    dailyMilkCollectionRepository.cleanupDuplicateCollections()
+                    Log.d("AutoSyncManager", "Cleaned up duplicate collections")
+                } catch (e: Exception) {
+                    Log.e("AutoSyncManager", "Failed to clean up duplicate collections: ${e.message}")
+                }
+                
                 // Check if we have internet connection
                 if (!networkUtils.isCurrentlyOnline()) {
                     Log.d("AutoSyncManager", "No internet connection, skipping auto sync")
                     return@launch
                 }
-                
-                // Sync all repositories
-                syncAllRepositories()
-                
+            
+            // Sync all repositories
+            syncAllRepositories()
+            
                 Log.d("AutoSyncManager", "Auto sync completed successfully")
-            } catch (e: Exception) {
+        } catch (e: Exception) {
                 Log.e("AutoSyncManager", "Error during auto sync: ${e.message}")
             }
         }
     }
-
+    
     /**
      * Sync all repositories with Firestore
      */
@@ -119,7 +127,7 @@ class AutoSyncManager(private val context: Context) {
             val farmers = farmerRepository.getAllFarmers()
             for (farmer in farmers) {
                 try {
-                    val farmerProfileCalculator = FarmerProfileCalculator(context)
+            val farmerProfileCalculator = FarmerProfileCalculator(context)
                     farmerProfileCalculator.updateFarmerProfile(farmer.id)
                 } catch (e: Exception) {
                     Log.e("AutoSyncManager", "Error updating profile for farmer ${farmer.id}: ${e.message}")
@@ -131,7 +139,7 @@ class AutoSyncManager(private val context: Context) {
             Log.e("AutoSyncManager", "Error updating farmer profiles: ${e.message}")
         }
     }
-
+    
 
     
     /**
@@ -144,7 +152,7 @@ class AutoSyncManager(private val context: Context) {
             val farmers = farmerRepository.getAllFarmers()
             for (farmer in farmers) {
                 try {
-                    val farmerProfileCalculator = FarmerProfileCalculator(context)
+            val farmerProfileCalculator = FarmerProfileCalculator(context)
                     farmerProfileCalculator.updateFarmerProfile(farmer.id)
                 } catch (e: Exception) {
                     Log.e("AutoSyncManager", "Error updating profile for farmer ${farmer.id}: ${e.message}")
@@ -156,7 +164,7 @@ class AutoSyncManager(private val context: Context) {
             Log.e("AutoSyncManager", "Error updating farmer profiles: ${e.message}")
         }
     }
-
+    
     /**
      * Check if data restoration is needed (fresh installation vs regular login)
      */
@@ -231,8 +239,8 @@ class AutoSyncManager(private val context: Context) {
             try {
                 kotlinx.coroutines.coroutineScope {
                     val fatTableJob = launch {
-                        try {
-                            fatTableRepository.loadFromFirestore()
+            try {
+                fatTableRepository.loadFromFirestore()
                             Log.d("AutoSyncManager", "✅ Preloaded fat table data")
                         } catch (e: Exception) {
                             Log.e("AutoSyncManager", "❌ Failed to preload fat table: ${e.message}")
@@ -306,6 +314,16 @@ class AutoSyncManager(private val context: Context) {
             } catch (e: Exception) {
                 Log.e("AutoSyncManager", "❌ Failed to preload billing cycles: ${e.message}")
                 onProgress(90, "Billing cycles loaded with errors")
+            }
+            
+            // Clean up corrupted billing cycle documents from farmer profiles
+            try {
+                billingCycleRepository.cleanupCorruptedBillingCycleDocuments()
+                Log.d("AutoSyncManager", "✅ Cleaned up corrupted billing cycle documents")
+                onProgress(92, "Corrupted documents cleaned successfully")
+            } catch (e: Exception) {
+                Log.e("AutoSyncManager", "❌ Failed to cleanup corrupted documents: ${e.message}")
+                onProgress(92, "Corrupted documents cleanup with errors")
             }
             
             onProgress(92, "Updating farmer profiles...")

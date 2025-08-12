@@ -56,7 +56,7 @@ class FarmerRepository(private val context: Context) {
                     if (userId != null) {
                         android.util.Log.d("FarmerRepository", "Syncing updated farmer to Firestore: users/$userId/farmers/${farmer.id}")
                         firestore.collection("users").document(userId).collection("farmers").document(farmer.id).set(farmer.copy(synced = true)).await()
-                        android.util.Log.d("FarmerRepository", "Successfully synced updated farmer to Firestore: ${farmer.id}")
+                    android.util.Log.d("FarmerRepository", "Successfully synced updated farmer to Firestore: ${farmer.id}")
                     } else {
                         android.util.Log.e("FarmerRepository", "Cannot sync farmer: User not authenticated")
                     }
@@ -99,10 +99,11 @@ class FarmerRepository(private val context: Context) {
                     db.farmerBillingDetailDao().deleteFarmerBillingDetail(billingDetail)
                     
                     // Delete billing cycle summary from Firestore
-                    billingCycleSummaryRepository.deleteBillingCycleSummary(
-                        billingCycleId = billingDetail.billingCycleId,
-                        farmerId = billingDetail.farmerId
-                    )
+                    // DISABLED: This was accessing corrupted billing cycle documents inside farmer profiles
+                    // billingCycleSummaryRepository.deleteBillingCycleSummary(
+                    //     billingCycleId = billingDetail.billingCycleId,
+                    //     farmerId = billingDetail.farmerId
+                    // )
                 }
                 android.util.Log.d("FarmerRepository", "Deleted all billing details for farmer: $id")
             } catch (e: Exception) {
@@ -118,7 +119,7 @@ class FarmerRepository(private val context: Context) {
             }
             
             // 4. Finally, delete the farmer from local database
-            farmerDao.deleteFarmerById(id)
+        farmerDao.deleteFarmerById(id)
             android.util.Log.d("FarmerRepository", "Successfully deleted farmer: $id")
             
         } catch (e: Exception) {
@@ -177,7 +178,7 @@ class FarmerRepository(private val context: Context) {
                 android.util.Log.d("FarmerRepository", "Uploading ${unsynced.size} unsynced farmers")
                 val userId = getCurrentUserId()
                 if (userId != null) {
-                    unsynced.forEach { farmer ->
+                unsynced.forEach { farmer ->
                         firestore.collection("users").document(userId).collection("farmers").document(farmer.id).set(farmer.copy(synced = true)).await()
                     }
                     markFarmersAsSynced(unsynced.map { it.id })
@@ -205,8 +206,8 @@ class FarmerRepository(private val context: Context) {
             val userId = getCurrentUserId()
             if (userId != null) {
                 firestore.collection("users").document(userId).collection("farmers").document(farmer.id).set(farmer.copy(synced = true)).await()
-                markFarmersAsSynced(listOf(farmer.id))
-                android.util.Log.d("FarmerRepository", "Farmer uploaded successfully: ${farmer.id}")
+            markFarmersAsSynced(listOf(farmer.id))
+            android.util.Log.d("FarmerRepository", "Farmer uploaded successfully: ${farmer.id}")
             } else {
                 android.util.Log.e("FarmerRepository", "Cannot upload farmer: User not authenticated")
             }
@@ -283,7 +284,7 @@ class FarmerRepository(private val context: Context) {
                 android.util.Log.d("FarmerRepository", "Uploading ${unsynced.size} unsynced farmers")
                 val userId = getCurrentUserId()
                 if (userId != null) {
-                    unsynced.forEach { farmer ->
+                unsynced.forEach { farmer ->
                         firestore.collection("users").document(userId).collection("farmers").document(farmer.id).set(farmer.copy(synced = true)).await()
                     }
                     markFarmersAsSynced(unsynced.map { it.id })

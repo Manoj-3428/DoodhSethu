@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.doodhsethu.data.models.MilkReportEntry
+import com.example.doodhsethu.data.models.FarmerMilkDetail
 
 import com.example.doodhsethu.data.repository.DailyMilkCollectionRepository
 import com.example.doodhsethu.utils.NetworkUtils
@@ -27,6 +28,12 @@ class MilkReportViewModel(private val context: Context) : ViewModel() {
     
     private val _reportEntries = MutableStateFlow<List<MilkReportEntry>>(emptyList())
     val reportEntries: StateFlow<List<MilkReportEntry>> = _reportEntries.asStateFlow()
+    
+    private val _farmerDetails = MutableStateFlow<List<FarmerMilkDetail>>(emptyList())
+    val farmerDetails: StateFlow<List<FarmerMilkDetail>> = _farmerDetails.asStateFlow()
+    
+    private val _selectedDate = MutableStateFlow<String?>(null)
+    val selectedDate: StateFlow<String?> = _selectedDate.asStateFlow()
     
 
     
@@ -279,6 +286,37 @@ class MilkReportViewModel(private val context: Context) : ViewModel() {
     
     fun clearError() {
         _errorMessage.value = null
+    }
+    
+    /**
+     * Load detailed farmer milk collection data for a specific date
+     */
+    fun loadFarmerDetailsForDate(date: String) {
+        viewModelScope.launch {
+            try {
+                _isLoading.value = true
+                _errorMessage.value = null
+                _selectedDate.value = date
+                
+                val details = repository.getFarmerMilkDetailsForDate(date)
+                _farmerDetails.value = details
+                
+                android.util.Log.d("MilkReportViewModel", "Loaded ${details.size} farmer details for date: $date")
+            } catch (e: Exception) {
+                _errorMessage.value = "Failed to load farmer details: ${e.message}"
+                android.util.Log.e("MilkReportViewModel", "Error loading farmer details: ${e.message}")
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+    
+    /**
+     * Clear farmer details (when closing the detail view)
+     */
+    fun clearFarmerDetails() {
+        _farmerDetails.value = emptyList()
+        _selectedDate.value = null
     }
 }
 

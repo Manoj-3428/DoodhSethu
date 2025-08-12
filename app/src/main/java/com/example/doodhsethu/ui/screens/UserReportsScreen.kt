@@ -43,6 +43,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import android.widget.Toast
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -94,8 +96,10 @@ fun UserReportsScreen(
     }
     
     // Auto-load pre-selected farmer's reports
-    LaunchedEffect(preSelectedFarmer, allFarmers) {
-        if (preSelectedFarmer != null && allFarmers.isNotEmpty()) {
+    LaunchedEffect(preSelectedFarmer) {
+        if (preSelectedFarmer != null) {
+            // Clear any previous data first
+            viewModel.clearData()
             farmerId = preSelectedFarmer.id
             selectedFarmer = preSelectedFarmer
             viewModel.loadUserReports(preSelectedFarmer.id)
@@ -103,12 +107,26 @@ fun UserReportsScreen(
     }
     
     // Auto-load reports when pre-filled farmer ID is provided
-    LaunchedEffect(preFilledFarmerId, allFarmers) {
-        if (preFilledFarmerId != null && allFarmers.isNotEmpty()) {
+    LaunchedEffect(preFilledFarmerId) {
+        if (preFilledFarmerId != null) {
+            // Clear any previous data first
+            viewModel.clearData()
+            farmerId = preFilledFarmerId
+            // Find farmer in allFarmers if available, otherwise load reports directly
             val farmer = allFarmers.find { it.id == preFilledFarmerId }
             if (farmer != null) {
                 selectedFarmer = farmer
-                viewModel.loadUserReports(preFilledFarmerId)
+            }
+            viewModel.loadUserReports(preFilledFarmerId)
+        }
+    }
+    
+    // Update selectedFarmer when allFarmers is loaded and we have a preFilledFarmerId
+    LaunchedEffect(allFarmers, preFilledFarmerId) {
+        if (allFarmers.isNotEmpty() && preFilledFarmerId != null) {
+            val farmer = allFarmers.find { it.id == preFilledFarmerId }
+            if (farmer != null && selectedFarmer == null) {
+                selectedFarmer = farmer
             }
         }
     }
@@ -173,6 +191,7 @@ fun UserReportsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
+                .verticalScroll(rememberScrollState())
                 .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {

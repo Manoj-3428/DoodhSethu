@@ -32,6 +32,8 @@ import com.example.doodhsethu.data.models.User
 import com.example.doodhsethu.ui.screens.BillingCycleScreen
 import com.example.doodhsethu.ui.screens.FarmerProfileScreen
 import com.example.doodhsethu.ui.screens.UserReportsScreen
+import com.example.doodhsethu.ui.screens.FarmerDetailsScreen
+
 import com.example.doodhsethu.utils.NetworkUtils
 import com.example.doodhsethu.utils.AutoSyncManager
 import com.example.doodhsethu.utils.GlobalNetworkManager
@@ -78,7 +80,7 @@ class MainActivity : ComponentActivity() {
 fun AuthApp() {
     var isLogin by remember { mutableStateOf(true) }
     var isAuthenticated by remember { mutableStateOf(false) }
-    var currentScreen by remember { mutableStateOf("milk_collection") }
+    var currentScreen by remember { mutableStateOf("dashboard") }
     var isLoading by remember { mutableStateOf(false) }
     var isSessionChecked by remember { mutableStateOf(false) }  // Track if session check is complete
     var isDataRestoring by remember { mutableStateOf(false) }
@@ -90,10 +92,22 @@ fun AuthApp() {
     var farmerToDelete by remember { mutableStateOf<com.example.doodhsethu.data.models.Farmer?>(null) }
     var currentUser by remember { mutableStateOf<User?>(null) }
     var selectedFarmer by remember { mutableStateOf<com.example.doodhsethu.data.models.Farmer?>(null) }
+    var selectedDate by remember { mutableStateOf<String?>(null) }
+
     val context = LocalContext.current
     val farmerViewModel: FarmerViewModel = viewModel(
         factory = com.example.doodhsethu.ui.viewmodels.FarmerViewModelFactory(context)
     )
+    
+    // Force cleanup duplicates on app start
+    LaunchedEffect(Unit) {
+        try {
+            val dailyMilkCollectionRepository = com.example.doodhsethu.data.repository.DailyMilkCollectionRepository(context)
+            dailyMilkCollectionRepository.cleanupDuplicateCollections()
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Error cleaning up duplicates on app start: ${e.message}")
+        }
+    }
     val authViewModel = viewModel<AuthViewModel>()
     val farmers by farmerViewModel.farmers.collectAsState()
     val authState by authViewModel.authState.collectAsState()
@@ -110,7 +124,8 @@ fun AuthApp() {
                 if (storedUser != null) {
                     currentUser = storedUser
                     isAuthenticated = true
-                    // Stay on milk_collection screen (already set as initial)
+                    // Set to dashboard screen (already set as initial)
+                    currentScreen = "dashboard"
                     // Restore the auth state from storage
                     authViewModel.restoreSessionFromStorage(context)
                     android.util.Log.d("MainActivity", "Session restored for user: ${storedUser.name}")
@@ -313,7 +328,7 @@ fun AuthApp() {
                     onAddFarmer = { currentScreen = "add_farmer" },
                     onSubmitSuccess = {
                         prefillFarmerId = null
-                        currentScreen = "dashboard"
+                        // Stay on the same screen - don't navigate to dashboard
                         // AutoSyncManager will handle farmer profile updates
                     },
                     onNavigateBack = { currentScreen = "dashboard" },
@@ -345,7 +360,20 @@ fun AuthApp() {
             }
             
             "milk_reports" -> {
-                MilkReportsScreen(onNavigateBack = { currentScreen = "dashboard" })
+                MilkReportsScreen(
+                    onNavigateBack = { currentScreen = "dashboard" },
+                    onNavigateToFarmerDetails = { date ->
+                        selectedDate = date
+                        currentScreen = "farmer_details"
+                    }
+                )
+            }
+            
+            "farmer_details" -> {
+                FarmerDetailsScreen(
+                    date = selectedDate ?: "",
+                    onNavigateBack = { currentScreen = "milk_reports" }
+                )
             }
 
 

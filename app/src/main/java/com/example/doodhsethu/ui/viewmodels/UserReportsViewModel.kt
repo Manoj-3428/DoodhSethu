@@ -182,6 +182,17 @@ class UserReportsViewModel(private val context: android.content.Context) : ViewM
         _errorMessage.value = null
         _successMessage.value = null
     }
+    
+    /**
+     * Clear all data to reset the screen state
+     */
+    fun clearData() {
+        _dailyCollections.value = emptyList()
+        _farmerName.value = ""
+        _errorMessage.value = null
+        _successMessage.value = null
+        _isLoading.value = false
+    }
 }
 
 class UserReportsViewModelFactory(private val context: Context) : ViewModelProvider.Factory {

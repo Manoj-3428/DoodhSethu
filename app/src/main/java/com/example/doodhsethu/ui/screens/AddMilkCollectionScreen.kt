@@ -27,6 +27,8 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.input.ImeAction
 import com.example.doodhsethu.R
@@ -132,10 +134,10 @@ fun AddMilkCollectionScreen(
     val fatValue = fat.toDoubleOrNull()
     val milkValue = milk.toDoubleOrNull()
     val isFatValid = fatValue != null && fatValue in 1.0..10.0
-    val isMilkValid = milkValue != null && milkValue in 1.0..30.0
+    val isMilkValid = milkValue != null && milkValue in 0.1..30.0
     val isFormValid = selectedFarmer != null && isFatValid && isMilkValid && farmerExists && !isLoading
-    val pricePerLiter = fatTableRows.find { fatValue != null && fatValue >= it.from && fatValue <= it.to }?.price ?: 0
-    val totalPrice = if (isFatValid && isMilkValid) (milkValue!! * pricePerLiter).toInt() else 0
+    val pricePerLiter = fatTableRows.find { fatValue != null && fatValue >= it.from && fatValue <= it.to }?.price ?: 0.0
+    val totalPrice = if (isFatValid && isMilkValid) (milkValue!! * pricePerLiter) else 0.0
 
     Scaffold(
         topBar = {
@@ -214,6 +216,7 @@ fun AddMilkCollectionScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
                         .padding(32.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
@@ -408,7 +411,7 @@ fun AddMilkCollectionScreen(
                         },
                         supportingText = {
                             if (!isMilkValid && milk.isNotBlank()) {
-                                Text("Enter a value between 1 and 30", color = Color.Red, fontSize = 12.sp)
+                                Text("Enter a value between 0.1 and 30", color = Color.Red, fontSize = 12.sp)
                             }
                         }
                     )
@@ -420,7 +423,7 @@ fun AddMilkCollectionScreen(
                             horizontalArrangement = Arrangement.End
                         ) {
                             Text(
-                                text = "Total Price: ₹$totalPrice",
+                                text = "Total Price: ₹${String.format("%.2f", totalPrice)}",
                                 fontFamily = PoppinsFont,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 22.sp,
@@ -491,7 +494,7 @@ fun AddMilkCollectionScreen(
                                                         farmerName = selectedFarmer!!.name,
                                                         amMilk = milkValue!!,
                                                         amFat = fatValue!!,
-                                                        amPrice = totalPrice.toDouble()
+                                                        amPrice = totalPrice
                                                     )
                                                 } else {
                                                     // Add PM session
@@ -500,7 +503,7 @@ fun AddMilkCollectionScreen(
                                             farmerName = selectedFarmer!!.name,
                                                         pmMilk = milkValue!!,
                                                         pmFat = fatValue!!,
-                                                        pmPrice = totalPrice.toDouble()
+                                                        pmPrice = totalPrice
                                                     )
                                                 }
 

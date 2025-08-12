@@ -9,6 +9,6 @@ data class FatRangeRow(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
     @ColumnInfo(name = "from") val from: Float,
     @ColumnInfo(name = "to") val to: Float,
-    @ColumnInfo(name = "price") val price: Int,
+    @ColumnInfo(name = "price") val price: Double,
     @ColumnInfo(name = "isSynced") val isSynced: Boolean = false
 ) 

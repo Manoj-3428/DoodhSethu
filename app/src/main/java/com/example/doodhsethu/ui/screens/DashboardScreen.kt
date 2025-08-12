@@ -505,23 +505,20 @@ fun FarmerCard(
             Column(
                 modifier = Modifier.weight(1f)
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = farmer.name,
-                        fontFamily = PoppinsFont,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp,
-                        color = PrimaryBlue
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Text(
-                        text = farmer.id,
-                        fontFamily = PoppinsFont,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp,
-                        color = SecondaryBlue
-                    )
-                }
+                Text(
+                    text = farmer.name,
+                    fontFamily = PoppinsFont,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    color = PrimaryBlue
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "ID: ${farmer.id}",
+                    fontFamily = PoppinsFont,
+                    fontSize = 12.sp,
+                    color = SecondaryBlue
+                )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = farmer.phone,

@@ -1,145 +1,89 @@
-# DoodhSethu - Dairy Management App 🥛
+# DoodhSethu - Login & Signup Screens
 
-**DoodhSethu** is a comprehensive dairy management application built with Android Kotlin and Jetpack Compose. It helps dairy farmers and milk collection centers manage their daily operations efficiently.
+This Android application implements beautiful login and signup screens using Jetpack Compose, designed specifically for tablet devices.
 
-## 🌟 Features
+## Features
 
-### 👨‍🌾 Farmer Management
-- Add, edit, and delete farmer profiles
-- Store farmer details (name, phone, location, photo)
-- Cascade deletion - all related data is removed when farmer is deleted
+### Design Implementation
+- **Figma Design**: Based on the provided Figma design with exact color scheme and layout
+- **Tablet Optimized**: Responsive design optimized for tablet screens
+- **Material Design 3**: Uses latest Material Design 3 components
+- **Custom Typography**: Implements Anton font for the main title
 
-### 🥛 Milk Collection
-- Daily milk collection tracking (Morning & Evening)
-- Automatic amount calculation based on fat percentage
-- Real-time fat table management
-- Duplicate entry prevention
+### UI Components
+- **Gradient Background**: Beautiful blue gradient background matching the design
+- **Card-based Layout**: Clean card layout with shadow effects
+- **Form Fields**: 
+  - Username field with user icon
+  - Email field with email icon (register mode only)
+  - Password field with lock icon and show/hide toggle
+- **Toggle Buttons**: Switch between Login and Register modes
+- **Action Buttons**: Styled buttons with proper shadows and rounded corners
+- **Decorative Elements**: Circular decorative elements matching the design
 
-### 💰 Billing & Payments
-- Automated billing cycle management
-- Payment tracking and history
-- Billing summaries and reports
-- Date range filtering
+### Technical Features
+- **Jetpack Compose**: Modern declarative UI framework
+- **State Management**: Proper state handling for form fields and mode switching
+- **Vector Drawables**: Custom icons created as Vector Drawables for scalability
+- **Custom Colors**: Brand-specific color scheme implemented
+- **Responsive Design**: Adapts to different tablet screen sizes
 
-### 📊 Reports & Analytics
-- Milk collection reports
-- Farmer performance analytics
-- Billing cycle summaries
-- Date-wise filtering options
-
-### 🔄 Data Synchronization
-- **Offline-first architecture** - Works without internet
-- **Real-time Firestore sync** - Automatic cloud backup
-- **Smart conflict resolution** - Handles data conflicts intelligently
-- **Background sync** - No loading indicators, smooth UX
-
-### 🔐 Authentication & Security
-- User authentication and session management
-- Secure data storage
-- Auto-login with session persistence
-
-## 🛠️ Technical Stack
-
-- **Language:** Kotlin
-- **UI Framework:** Jetpack Compose
-- **Architecture:** MVVM with Repository Pattern
-- **Local Database:** Room
-- **Cloud Database:** Firebase Firestore
-- **Authentication:** Firebase Auth
-- **Image Handling:** Local storage with cloud sync
-- **Network:** Retrofit + OkHttp
-
-## 📱 Screenshots
-
-*(Add screenshots of your app here)*
-
-## 🚀 Getting Started
-
-### Prerequisites
-- Android Studio Arctic Fox or later
-- Kotlin 1.8+
-- Android SDK 21+
-- Firebase project setup
-
-### Installation
-
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/Manoj-3428/DoodhSethu.git
-   cd DoodhSethu
-   ```
-
-2. **Setup Firebase**
-   - Create a Firebase project
-   - Add your `google-services.json` to `app/` directory
-   - Enable Firestore and Authentication
-
-3. **Build and Run**
-   ```bash
-   ./gradlew assembleDebug
-   ```
-
-## 📂 Project Structure
+## File Structure
 
 ```
-app/
-├── src/main/java/com/example/doodhsethu/
-│   ├── data/
-│   │   ├── models/          # Data models and Room entities
-│   │   └── repository/      # Repository classes for data management
-│   ├── ui/
-│   │   ├── screens/         # Compose UI screens
-│   │   ├── viewmodels/      # ViewModels for MVVM architecture
-│   │   └── theme/           # App theming and colors
-│   ├── utils/               # Utility classes
-│   └── MainActivity.kt      # Main entry point
+app/src/main/
+├── java/com/example/doodhsethu/
+│   ├── MainActivity.kt              # Main activity with AuthApp composable
+│   ├── AuthScreens.kt              # Login/Signup screen implementations
+│   └── ui/theme/
+│       ├── Color.kt                # Custom color definitions
+│       ├── Type.kt                 # Typography with Anton font
+│       └── Theme.kt                # Material 3 theme
+├── res/
+│   ├── drawable/
+│   │   ├── ic_user.xml            # User icon
+│   │   ├── ic_email.xml           # Email icon
+│   │   ├── ic_lock.xml            # Lock icon
+│   │   ├── ic_eye.xml             # Eye icon (show password)
+│   │   ├── ic_eye_slash.xml       # Eye slash icon (hide password)
+│   │   ├── bg_circle_large.png    # Large background circle
+│   │   └── bg_circle_small.png    # Small background circle
+│   └── font/
+│       └── anton_regular.ttf      # Anton font file
 ```
 
-## 🔧 Key Features Implementation
+## Color Scheme
 
-### Offline-First Architecture
-- Local Room database as single source of truth
-- Background Firestore synchronization
-- Intelligent conflict resolution
-- Network state monitoring
+- **Primary Blue**: #004E89
+- **Secondary Blue**: #1A659E
+- **Light Blue**: #C3E5FF
+- **Background Blue**: #E4F3FF
+- **Text Blue**: #E6F4FF
+- **White**: #FFFFFF
 
-### Smart Data Management
-- Automatic duplicate prevention
-- Cascade deletion for data integrity
-- Optimized database queries
-- Efficient memory usage
+## How to Run
 
-### User Experience
-- No loading indicators for smooth UX
-- Instant local operations
-- Background cloud sync
-- Responsive Material Design UI
+1. Open the project in Android Studio
+2. Ensure you have the latest Android SDK and build tools
+3. Connect a tablet device or use tablet emulator
+4. Click "Run" to build and install the app
 
-## 🤝 Contributing
+## Design Notes
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
+The implementation closely follows the Figma design with:
+- Exact color matching
+- Proper spacing and typography
+- Decorative circular elements
+- Form field styling with icons
+- Responsive layout for tablet screens
+- Smooth transitions between login and register modes
 
-## 📝 License
+## Future Enhancements
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 📧 Contact
-
-**Manoj Kumar** - [GitHub](https://github.com/Manoj-3428)
-
-Project Link: [https://github.com/Manoj-3428/DoodhSethu](https://github.com/Manoj-3428/DoodhSethu)
-
-## 🙏 Acknowledgments
-
-- Built with Android Jetpack Compose
-- Firebase for backend services
-- Material Design for UI components
-- Room database for local storage
-
----
-
-⭐ **If you find this project helpful, please give it a star!** ⭐
+- Add form validation
+- Implement actual authentication logic
+- Add loading states
+- Include error handling
+- Add animations for mode switching
+- Implement biometric authentication 
+ 

@@ -280,7 +280,44 @@ val MIGRATION_14_15 = object : Migration(14, 15) {
     }
 }
 
-@Database(entities = [Farmer::class, FatRangeRow::class, MilkCollection::class, User::class, BillingCycle::class, FarmerBillingDetail::class, DailyMilkCollection::class], version = 15, exportSchema = false)
+val MIGRATION_15_16 = object : Migration(15, 16) {
+    override fun migrate(database: SupportSQLiteDatabase) {
+        android.util.Log.d("Migration", "Starting MIGRATION_15_16 - Converting fat_table price to REAL")
+        
+        try {
+            // Create new table with REAL price column
+            database.execSQL("""
+                CREATE TABLE fat_table_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    `from` REAL NOT NULL,
+                    `to` REAL NOT NULL,
+                    price REAL NOT NULL,
+                    isSynced INTEGER NOT NULL DEFAULT 0
+                )
+            """)
+            
+            // Copy data from old table to new table
+            database.execSQL("""
+                INSERT INTO fat_table_new (id, `from`, `to`, price, isSynced)
+                SELECT id, `from`, `to`, CAST(price AS REAL), isSynced
+                FROM fat_table
+            """)
+            
+            // Drop old table
+            database.execSQL("DROP TABLE fat_table")
+            
+            // Rename new table to original name
+            database.execSQL("ALTER TABLE fat_table_new RENAME TO fat_table")
+            
+            android.util.Log.d("Migration", "MIGRATION_15_16 completed successfully")
+        } catch (e: Exception) {
+            android.util.Log.e("Migration", "Error during MIGRATION_15_16: ${e.message}")
+            throw e
+        }
+    }
+}
+
+@Database(entities = [Farmer::class, FatRangeRow::class, MilkCollection::class, User::class, BillingCycle::class, FarmerBillingDetail::class, DailyMilkCollection::class], version = 16, exportSchema = false)
 @TypeConverters(DateConverter::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun farmerDao(): FarmerDao

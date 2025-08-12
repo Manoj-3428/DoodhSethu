@@ -50,10 +50,20 @@ class FatTableViewModel(context: Context) : ViewModel() {
                 if (rows.isEmpty()) {
                     android.util.Log.d("FatTableViewModel", "No local data found, adding sample data")
                     val sampleData = listOf(
-                        FatRangeRow(from = 6.0f, to = 7.0f, price = 50),
-                        FatRangeRow(from = 7.1f, to = 8.0f, price = 60),
-                        FatRangeRow(from = 8.1f, to = 9.0f, price = 70),
-                        FatRangeRow(from = 9.1f, to = 10.0f, price = 80)
+                        FatRangeRow(from = 6.3f, to = 6.5f, price = 49.41),
+                        FatRangeRow(from = 6.6f, to = 6.8f, price = 51.84),
+                        FatRangeRow(from = 6.9f, to = 7.1f, price = 54.27),
+                        FatRangeRow(from = 7.2f, to = 7.4f, price = 56.7),
+                        FatRangeRow(from = 7.5f, to = 7.7f, price = 59.13),
+                        FatRangeRow(from = 7.8f, to = 8.0f, price = 61.56),
+                        FatRangeRow(from = 8.1f, to = 8.3f, price = 63.99),
+                        FatRangeRow(from = 8.4f, to = 8.6f, price = 66.42),
+                        FatRangeRow(from = 8.7f, to = 8.9f, price = 68.85),
+                        FatRangeRow(from = 9.0f, to = 9.2f, price = 71.28),
+                        FatRangeRow(from = 9.3f, to = 9.5f, price = 73.71),
+                        FatRangeRow(from = 9.6f, to = 9.8f, price = 76.14),
+                        FatRangeRow(from = 9.9f, to = 10.1f, price = 78.57),
+                        FatRangeRow(from = 10.2f, to = 10.4f, price = 81.0)
                     )
                     repository.insertFatRows(sampleData)
                     rows = repository.getAllFatRows()

@@ -21,10 +21,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.example.doodhsethu.data.models.Farmer
 import com.example.doodhsethu.data.models.FarmerBillingDetail
 import com.example.doodhsethu.ui.theme.PoppinsFont
 import com.example.doodhsethu.ui.viewmodels.FarmerProfileViewModel
+import com.example.doodhsethu.utils.LocalPhotoManager
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -165,6 +168,12 @@ fun FarmerProfileScreen(
 
 @Composable
 fun FarmerInfoCard(farmer: Farmer) {
+    val context = LocalContext.current
+    val localPhotoManager = remember { LocalPhotoManager(context) }
+    
+    // Get local photo URI if available
+    val localPhotoUri = localPhotoManager.getFarmerPhotoUri(farmer.id)
+    
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -179,22 +188,40 @@ fun FarmerInfoCard(farmer: Farmer) {
                 .padding(20.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Profile icon with background
-            Box(
-                modifier = Modifier
-                    .size(80.dp)
-                    .background(
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                        shape = RoundedCornerShape(40.dp)
-                    ),
-                contentAlignment = Alignment.Center
+            // Profile photo with background
+            Card(
+                modifier = Modifier.size(80.dp),
+                shape = RoundedCornerShape(40.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
             ) {
-                Icon(
-                    painter = painterResource(id = com.example.doodhsethu.R.drawable.ic_person),
-                    contentDescription = null,
-                    modifier = Modifier.size(40.dp),
-                    tint = MaterialTheme.colorScheme.primary
-                )
+                // Load from local storage only
+                if (localPhotoUri != null) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(context)
+                            .data(localPhotoUri)
+                            .crossfade(true)
+                            .build(),
+                        contentDescription = "Farmer Photo",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            painter = painterResource(id = com.example.doodhsethu.R.drawable.ic_person),
+                            contentDescription = "Default Photo",
+                            modifier = Modifier.size(40.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
             }
             
             Spacer(modifier = Modifier.height(16.dp))
@@ -203,22 +230,30 @@ fun FarmerInfoCard(farmer: Farmer) {
                 text = farmer.name,
                 fontFamily = PoppinsFont,
                 fontWeight = FontWeight.Bold,
-                fontSize = 20.sp
+                fontSize = 18.sp,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
             )
             
+            Spacer(modifier = Modifier.height(2.dp))
+            
             Text(
-                text = "ID: ${farmer.id}",
+                text = farmer.id,
                 fontFamily = PoppinsFont,
-                fontSize = 14.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
             )
             
             if (farmer.phone.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = farmer.phone,
                     fontFamily = PoppinsFont,
-                    fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
                 )
             }
         }

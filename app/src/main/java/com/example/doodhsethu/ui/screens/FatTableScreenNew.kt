@@ -5,7 +5,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.*
@@ -98,6 +100,7 @@ fun FatTableScreenNew(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
+                .verticalScroll(rememberScrollState())
                 .padding(16.dp)
         ) {
             // Top bar
@@ -399,7 +402,7 @@ fun FatRowDialogNew(
                     id = initialRow?.id ?: -1,
                     from = fromValue,
                     to = toValue,
-                    price = 0,
+                    price = 0.0,
                     isSynced = false
                 )
                 
@@ -455,7 +458,7 @@ fun FatRowDialogNew(
                     onValueChange = { price = it },
                     label = { Text("Price (₹)") },
                     keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Number
+                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal
                     ),
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -477,7 +480,7 @@ fun FatRowDialogNew(
                 onClick = {
                     val fromValue = from.toFloatOrNull()
                     val toValue = to.toFloatOrNull()
-                    val priceValue = price.toIntOrNull()
+                    val priceValue = price.toDoubleOrNull()
                     
                     if (fromValue != null && toValue != null && priceValue != null && fromValue < toValue && validationError == null) {
                         // Preserve the original ID when editing

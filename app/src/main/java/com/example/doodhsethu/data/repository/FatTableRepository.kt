@@ -1,7 +1,7 @@
 package com.example.doodhsethu.data.repository
 
 import android.content.Context
-import com.example.doodhsethu.data.models.AppDatabase
+
 import com.example.doodhsethu.data.models.DatabaseManager
 import com.example.doodhsethu.data.models.FatRangeRow
 import com.google.firebase.firestore.FirebaseFirestore
@@ -56,7 +56,7 @@ class FatTableRepository(context: Context) {
             snapshot.documents.mapNotNull { doc ->
                 val from = doc.getDouble("from")?.toFloat()
                 val to = doc.getDouble("to")?.toFloat()
-                val price = doc.getLong("price")?.toInt()
+                val price = doc.getDouble("price")
                 if (from != null && to != null && price != null) {
                     FatRangeRow(from = from, to = to, price = price)
                 } else null

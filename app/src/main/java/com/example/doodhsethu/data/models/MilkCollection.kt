@@ -36,6 +36,20 @@ data class MilkReportEntry(
     val totalPrice: Double = 0.0
 )
 
+// Data class for detailed farmer milk collection data (shown when clicking on a date)
+data class FarmerMilkDetail(
+    val farmerId: String,
+    val farmerName: String,
+    val amMilk: Double = 0.0,
+    val amFat: Double = 0.0,
+    val amPrice: Double = 0.0,
+    val pmMilk: Double = 0.0,
+    val pmFat: Double = 0.0,
+    val pmPrice: Double = 0.0,
+    val totalMilk: Double = 0.0,
+    val totalPrice: Double = 0.0
+)
+
 // Data class for milk report summary
 data class MilkReportSummary(
     val period: String,

@@ -166,10 +166,11 @@ class BillingCycleRepository(private val context: Context) {
             }
             
             // Initialize billing cycle summaries in background
+            // DISABLED: This was creating corrupted billing cycle documents inside farmer profiles
             CoroutineScope(Dispatchers.IO).launch {
                 try {
-                    android.util.Log.d("BillingCycleRepository", "Initializing billing cycle summaries in background")
-                    initializeBillingCycleSummaries(billingCycleId, farmers)
+                    android.util.Log.d("BillingCycleRepository", "Billing cycle summaries initialization DISABLED to prevent corruption")
+                    // initializeBillingCycleSummaries(billingCycleId, farmers) // DISABLED
                 } catch (e: Exception) {
                     android.util.Log.e("BillingCycleRepository", "Failed to initialize billing cycle summaries: ${e.message}")
                 }
@@ -202,38 +203,12 @@ class BillingCycleRepository(private val context: Context) {
     }
     
     // Initialize billing cycle summaries for all farmers
+    // DISABLED: This was creating corrupted billing cycle documents inside farmer profiles
     private suspend fun initializeBillingCycleSummaries(billingCycleId: String, farmers: List<Farmer>) {
-        android.util.Log.d("BillingCycleRepository", "Billing cycle ID: $billingCycleId")
-        android.util.Log.d("BillingCycleRepository", "Number of farmers: ${farmers.size}")
-        
-        for (farmer in farmers) {
-            // Get the billing cycle to access start and end dates
-            val billingCycle = billingCycleDao.getBillingCycleById(billingCycleId)
-            if (billingCycle != null) {
-                val collections = dailyMilkCollectionRepository.getCollectionsByFarmerAndDateRange(
-                    farmer.id, billingCycle.startDate, billingCycle.endDate
-                )
-                val farmerTotal = collections.sumOf { it.totalAmount }
-                
-                // Initialize billing cycle summary for this farmer in Firestore with actual amounts
-                android.util.Log.d("BillingCycleRepository", "Initializing billing cycle summary for farmer ${farmer.id} with amount ₹$farmerTotal")
-                
-                try {
-                    billingCycleSummaryRepository.initializeBillingCycleSummary(
-                        billingCycleId = billingCycleId,
-                        farmerId = farmer.id,
-                        farmerName = farmer.name,
-                        totalAmount = farmerTotal,
-                        totalMilk = 0.0, // Will be updated when milk collections are processed
-                        totalFat = 0.0   // Will be updated when milk collections are processed
-                    )
-                    android.util.Log.d("BillingCycleRepository", "Completed billing cycle summary initialization for farmer ${farmer.id}")
-                    } catch (e: Exception) {
-                    android.util.Log.e("BillingCycleRepository", "Error initializing billing cycle summary for farmer ${farmer.id}: ${e.message}")
-                }
-            }
-        }
-        android.util.Log.d("BillingCycleRepository", "Initialized billing cycle summaries for ${farmers.size} farmers")
+        // DISABLED: This functionality was creating corrupted billing cycle documents
+        // inside farmer profiles. Billing cycles should only be in the main billing cycles collection.
+        android.util.Log.d("BillingCycleRepository", "initializeBillingCycleSummaries DISABLED to prevent corruption")
+        return
     }
 
     // Delete a billing cycle
@@ -300,10 +275,11 @@ class BillingCycleRepository(private val context: Context) {
                         farmerProfileCalculator.updateFarmerProfile(farmerDetail.farmerId)
                         
                         // Delete billing cycle summary from Firestore
-                        billingCycleSummaryRepository.deleteBillingCycleSummary(
-                            billingCycleId = billingCycle.id,
-                            farmerId = farmerDetail.farmerId
-                        )
+                        // DISABLED: This was accessing corrupted billing cycle documents inside farmer profiles
+                        // billingCycleSummaryRepository.deleteBillingCycleSummary(
+                        //     billingCycleId = billingCycle.id,
+                        //     farmerId = farmerDetail.farmerId
+                        // )
                     }
                     android.util.Log.d("BillingCycleRepository", "Updated ${affectedFarmerDetails.size} farmers after billing cycle deletion")
                 } catch (e: Exception) {
@@ -331,15 +307,19 @@ class BillingCycleRepository(private val context: Context) {
             existingCalendar.get(Calendar.YEAR) == calendar.get(Calendar.YEAR)
         }.groupBy { "${it.startDate.time}_${it.endDate.time}" }.size
         
-        val ordinal = when (uniqueCyclesForMonth + 1) {
+        // If there are no existing cycles for this month, this is the 1st cycle
+        // If there are existing cycles, this will be the next one
+        val cycleNumber = uniqueCyclesForMonth + 1
+        
+        val ordinal = when (cycleNumber) {
             1 -> "1st"
             2 -> "2nd"
             3 -> "3rd"
-            else -> "${uniqueCyclesForMonth + 1}th"
+            else -> "${cycleNumber}th"
         }
         
         val result = "$ordinal billing_cycle:$monthAbbr"
-        android.util.Log.d("BillingCycleRepository", "Generated billing cycle name: $result (month: $monthAbbr, unique cycles: ${uniqueCyclesForMonth + 1})")
+        android.util.Log.d("BillingCycleRepository", "Generated billing cycle name: $result (month: $monthAbbr, existing cycles: $uniqueCyclesForMonth, this will be cycle #$cycleNumber)")
         return result
     }
 
@@ -560,6 +540,12 @@ class BillingCycleRepository(private val context: Context) {
         try {
             android.util.Log.d("BillingCycleRepository", "Starting optimized syncAllDataWhenOnline for BillingCycleRepository")
 
+            val userId = authViewModel.getStoredUser(context)?.userId
+            if (userId == null) {
+                android.util.Log.e("BillingCycleRepository", "Cannot sync: User not authenticated")
+                return@withContext
+            }
+
             // Get all billing cycles that need syncing (only unsynced ones)
             val unsyncedBillingCycles = billingCycleDao.getUnsyncedBillingCycles()
             android.util.Log.d("BillingCycleRepository", "Found ${unsyncedBillingCycles.size} unsynced billing cycles")
@@ -574,31 +560,65 @@ class BillingCycleRepository(private val context: Context) {
                 val farmerDetails = farmerBillingDetailDao.getFarmerBillingDetailsByBillingCycleId(billingCycle.id)
                 android.util.Log.d("BillingCycleRepository", "Syncing billing cycle ${billingCycle.id} with ${farmerDetails.size} farmer details")
                 
-                // Use coroutines to process farmer details in parallel for better performance
-                val syncJobs = farmerDetails.map { farmerDetail ->
-                    CoroutineScope(Dispatchers.IO).async {
+                // Sync the main billing cycle document to Firestore
+                try {
+                    val billingCycleData = mapOf(
+                        "id" to billingCycle.id,
+                        "name" to billingCycle.name,
+                        "start_date" to com.google.firebase.Timestamp(billingCycle.startDate),
+                        "end_date" to com.google.firebase.Timestamp(billingCycle.endDate),
+                        "total_amount" to billingCycle.totalAmount,
+                        "is_paid" to billingCycle.isPaid,
+                        "is_active" to billingCycle.isActive,
+                        "created_at" to com.google.firebase.Timestamp(billingCycle.createdAt),
+                        "is_synced" to true
+                    )
+                    
+                    firestore.collection("users").document(userId)
+                        .collection("billing_cycle")
+                        .document(billingCycle.id)
+                        .set(billingCycleData)
+                        .await()
+                    
+                    android.util.Log.d("BillingCycleRepository", "Successfully synced main billing cycle document: ${billingCycle.id}")
+                    
+                    // Sync farmer billing details to Firestore
+                    for (farmerDetail in farmerDetails) {
                         try {
-                            billingCycleSummaryRepository.initializeBillingCycleSummary(
-                                billingCycleId = billingCycle.id,
-                                farmerId = farmerDetail.farmerId,
-                                farmerName = farmerDetail.farmerName,
-                                totalAmount = farmerDetail.originalAmount,
-                                totalMilk = 0.0,
-                                totalFat = 0.0
+                            val farmerDetailData = mapOf(
+                                "id" to farmerDetail.id,
+                                "billing_cycle_id" to farmerDetail.billingCycleId,
+                                "farmer_id" to farmerDetail.farmerId,
+                                "farmer_name" to farmerDetail.farmerName,
+                                "original_amount" to farmerDetail.originalAmount,
+                                "paid_amount" to farmerDetail.paidAmount,
+                                "balance_amount" to farmerDetail.balanceAmount,
+                                "is_paid" to farmerDetail.isPaid,
+                                "payment_date" to farmerDetail.paymentDate?.let { com.google.firebase.Timestamp(it) },
+                                "is_synced" to true
                             )
-                            android.util.Log.d("BillingCycleRepository", "Synced farmer ${farmerDetail.farmerId} for cycle ${billingCycle.id}")
+                            
+                            firestore.collection("users").document(userId)
+                                .collection("billing_cycle")
+                                .document(billingCycle.id)
+                                .collection("farmers")
+                                .document(farmerDetail.farmerId)
+                                .set(farmerDetailData)
+                                .await()
+                            
+                            android.util.Log.d("BillingCycleRepository", "Synced farmer billing detail: ${farmerDetail.farmerId} for cycle ${billingCycle.id}")
         } catch (e: Exception) {
-                            android.util.Log.e("BillingCycleRepository", "Failed to sync farmer ${farmerDetail.farmerId}: ${e.message}")
-                        }
+                            android.util.Log.e("BillingCycleRepository", "Failed to sync farmer detail ${farmerDetail.farmerId}: ${e.message}")
                     }
                 }
-                
-                // Wait for all farmer details to be synced
-                syncJobs.awaitAll()
                 
                 // Mark billing cycle as synced
                 billingCycleDao.markBillingCycleAsSynced(billingCycle.id)
                 android.util.Log.d("BillingCycleRepository", "Marked billing cycle ${billingCycle.id} as synced")
+                    
+                } catch (e: Exception) {
+                    android.util.Log.e("BillingCycleRepository", "Failed to sync billing cycle ${billingCycle.id}: ${e.message}")
+                }
             }
 
             android.util.Log.d("BillingCycleRepository", "Successfully synced ${unsyncedBillingCycles.size} billing cycles to Firestore")
@@ -610,16 +630,16 @@ class BillingCycleRepository(private val context: Context) {
 
     /**
      * Restore billing cycles and farmer billing details from Firestore to local Room database
-     * This function fetches data from the Firestore structure: "billing_cycle -> [cycleId] -> farmers -> [farmerId] -> { billing data }"
+     * This function fetches data from the Firestore structure: "users/{userId}/billing_cycle -> [cycleId] -> farmers -> [farmerId] -> { billing data }"
      */
-    suspend fun restoreBillingCyclesFromFirestore() = withContext(Dispatchers.IO) {
+    suspend fun restoreBillingCyclesFromFirestore(userId: String) = withContext(Dispatchers.IO) {
         if (!networkUtils.isCurrentlyOnline()) {
             android.util.Log.d("BillingCycleRepository", "Network not available, skipping restoreBillingCyclesFromFirestore")
             return@withContext
         }
         
         try {
-            android.util.Log.d("BillingCycleRepository", "Starting restoration of billing cycles from Firestore")
+            android.util.Log.d("BillingCycleRepository", "Starting restoration of billing cycles from Firestore for user: $userId")
             
             var totalBillingCyclesRestored = 0
             var totalFarmerDetailsRestored = 0
@@ -628,9 +648,12 @@ class BillingCycleRepository(private val context: Context) {
             val processedBillingCycleIds = mutableSetOf<String>()
             val processedFarmerDetailIds = mutableSetOf<String>()
             
-            // 1. Fetch all documents from billing_cycle collection
-            val billingCyclesSnapshot = firestore.collection("billing_cycle").get().await()
-            android.util.Log.d("BillingCycleRepository", "Found ${billingCyclesSnapshot.documents.size} billing cycle documents in billing_cycle")
+            // 1. Fetch all documents from users/{userId}/billing_cycle collection
+            val billingCyclesSnapshot = firestore.collection("users")
+                .document(userId)
+                .collection("billing_cycle")
+                .get().await()
+            android.util.Log.d("BillingCycleRepository", "Found ${billingCyclesSnapshot.documents.size} billing cycle documents in users/$userId/billing_cycle")
             
             for (billingCycleDoc in billingCyclesSnapshot.documents) {
                 val cycleId = billingCycleDoc.id
@@ -640,7 +663,9 @@ class BillingCycleRepository(private val context: Context) {
                 
                 try {
                     // 2. Fetch nested farmer data for this billing cycle
-                    val farmersSnapshot = firestore.collection("billing_cycle")
+                    val farmersSnapshot = firestore.collection("users")
+                        .document(userId)
+                        .collection("billing_cycle")
                         .document(cycleId)
                         .collection("farmers")
                         .get().await()
@@ -653,7 +678,7 @@ class BillingCycleRepository(private val context: Context) {
                         val farmerData = farmerDoc.data
                         
                         if (farmerData != null) {
-                            android.util.Log.d("BillingCycleRepository", "Restoring from billing_cycle/$cycleId/farmers/$farmerId")
+                            android.util.Log.d("BillingCycleRepository", "Restoring from users/$userId/billing_cycle/$cycleId/farmers/$farmerId")
                             
                             // Process BillingCycle if not already processed
                             if (!processedBillingCycleIds.contains(cycleId)) {
@@ -725,6 +750,18 @@ class BillingCycleRepository(private val context: Context) {
             
             android.util.Log.d("BillingCycleRepository", "Successfully restored $totalBillingCyclesRestored billing cycles and $totalFarmerDetailsRestored farmer details from Firestore")
             
+            // Ensure all farmers have billing cycles for the current month (this will now use the correctly restored main cycles)
+            ensureAllFarmersHaveBillingCycles()
+            
+            // Force cleanup all duplicates (based on date range)
+            forceCleanupAllDuplicates()
+            
+            // Fix billing cycle names to ensure proper formatting (this should be the last step for names)
+            fixBillingCycleNames()
+            
+            // Regular cleanup (might be redundant after forceCleanup and fixNames, but keep for safety)
+            cleanupDuplicateData()
+            
         } catch (e: Exception) {
             android.util.Log.e("BillingCycleRepository", "Error during billing cycles restoration: ${e.message}")
             android.util.Log.e("BillingCycleRepository", "Stack trace: ${e.stackTraceToString()}")
@@ -743,167 +780,6 @@ class BillingCycleRepository(private val context: Context) {
             dateFormat.parse(dateStr) ?: Date()
         } else {
             Date() // Fallback to current date if ID format is unexpected
-        }
-    }
-
-    /**
-     * Restore billing cycles from Firestore for a specific user
-     */
-    suspend fun restoreBillingCyclesFromFirestore(userId: String) = withContext(Dispatchers.IO) {
-        if (!networkUtils.isCurrentlyOnline()) {
-            android.util.Log.d("BillingCycleRepository", "Network not available, skipping restoreBillingCyclesFromFirestore")
-            return@withContext
-        }
-        
-        try {
-            android.util.Log.d("BillingCycleRepository", "Starting restoration of billing cycles from Firestore for user: $userId")
-            
-            val allFarmers = farmerRepository.getAllFarmers()
-            android.util.Log.d("BillingCycleRepository", "Found ${allFarmers.size} farmers to restore billing cycles for")
-            
-            var totalBillingCyclesRestored = 0
-            var totalFarmerDetailsRestored = 0
-            
-            // Map to temporarily store all farmer billing details, grouped by their consistentBillingCycleId
-            val tempFarmerBillingDetailsByCycle = mutableMapOf<String, MutableList<FarmerBillingDetail>>()
-            
-            // Pass 1: Collect all farmer billing details from Firestore for all farmers
-            for (farmer in allFarmers) {
-                try {
-                    val userSpecificPath = "users/$userId/farmers/${farmer.id}/billing_cycle"
-                    val billingCycleSnapshot = try {
-                        firestore.collection(userSpecificPath).get().await()
-                    } catch (e: Exception) {
-                        android.util.Log.d("BillingCycleRepository", "User-specific path not found for farmer ${farmer.id}, trying legacy path")
-                        val legacyPath = "farmers/${farmer.id}/billing_cycle"
-                        firestore.collection(legacyPath).get().await()
-                    }
-
-                    android.util.Log.d("BillingCycleRepository", "Found ${billingCycleSnapshot.documents.size} billing cycle documents for farmer: ${farmer.id}")
-                    
-                    for (doc in billingCycleSnapshot.documents) {
-                            val data = doc.data
-                            if (data != null) {
-                            val startDate = (data["start_date"] as? com.google.firebase.Timestamp)?.toDate() ?: parseDateFromBillingCycleId(doc.id, true)
-                            val endDate = (data["end_date"] as? com.google.firebase.Timestamp)?.toDate() ?: parseDateFromBillingCycleId(doc.id, false)
-                            val consistentBillingCycleId = generateBillingCycleId(startDate, endDate)
-
-                            val farmerDetail = FarmerBillingDetail(
-                                id = "${farmer.id}_$consistentBillingCycleId",
-                                farmerId = farmer.id,
-                                farmerName = farmer.name,
-                                billingCycleId = consistentBillingCycleId,
-                                originalAmount = (data["total_amount"] as? Number)?.toDouble() ?: 0.0, // This is the individual farmer's amount
-                                paidAmount = (data["paid_amount"] as? Number)?.toDouble() ?: 0.0,
-                                balanceAmount = (data["balance_amount"] as? Number)?.toDouble() ?: 0.0,
-                                isPaid = data["is_paid"] as? Boolean ?: true,
-                                paymentDate = (data["payment_date"] as? com.google.firebase.Timestamp)?.toDate() ?: Date(),
-                                isSynced = true
-                            )
-
-                            if (!tempFarmerBillingDetailsByCycle.containsKey(consistentBillingCycleId)) {
-                                tempFarmerBillingDetailsByCycle[consistentBillingCycleId] = mutableListOf()
-                            }
-                            tempFarmerBillingDetailsByCycle[consistentBillingCycleId]?.add(farmerDetail)
-                            android.util.Log.d("BillingCycleRepository", "Collected farmer detail for cycle $consistentBillingCycleId: ${farmerDetail.farmerName} - ₹${farmerDetail.originalAmount}")
-                        }
-                    }
-                } catch (e: Exception) {
-                    android.util.Log.e("BillingCycleRepository", "Error collecting billing cycles for farmer ${farmer.id}: ${e.message}")
-                }
-            }
-
-            // Pass 2: Create/update main BillingCycle objects and insert FarmerBillingDetails
-            for ((consistentBillingCycleId, farmerDetailsList) in tempFarmerBillingDetailsByCycle) {
-                val totalAmountForCycle = farmerDetailsList.sumOf { it.originalAmount }
-                val firstDetail = farmerDetailsList.first() // Use first detail to get common cycle properties
-
-                val startDate = parseDateFromBillingCycleId(consistentBillingCycleId, true)
-                val endDate = parseDateFromBillingCycleId(consistentBillingCycleId, false)
-                val createdAt = firstDetail.paymentDate ?: Date() // Using paymentDate as a proxy for creation date
-
-                // Temporarily use a simple name. fixBillingCycleNames will correct it later.
-                val tempBillingCycleName = "Billing Cycle ${SimpleDateFormat("dd MMM", Locale.getDefault()).format(startDate)} - ${SimpleDateFormat("dd MMM", Locale.getDefault()).format(endDate)}"
-
-                // Create or update the main BillingCycle object
-                val existingCycle = billingCycleDao.getBillingCycleById(consistentBillingCycleId)
-                                    if (existingCycle == null) {
-                                        val billingCycle = BillingCycle(
-                        id = consistentBillingCycleId,
-                        name = tempBillingCycleName, // Use temporary name
-                        startDate = startDate,
-                        endDate = endDate,
-                        totalAmount = totalAmountForCycle,
-                        isPaid = true, // Assuming if restored, it's paid
-                        isActive = true,
-                        createdAt = createdAt,
-                                            isSynced = true
-                                        )
-                                        billingCycleDao.insertBillingCycle(billingCycle)
-                                        totalBillingCyclesRestored++
-                    android.util.Log.d("BillingCycleRepository", "Restored main billing cycle: $consistentBillingCycleId - ${billingCycle.name} - Total: ₹${billingCycle.totalAmount}")
-                                    } else {
-                    // Update existing cycle if total amount or name changed
-                    if (existingCycle.totalAmount != totalAmountForCycle || existingCycle.name != tempBillingCycleName) {
-                        val updatedCycle = existingCycle.copy(
-                            totalAmount = totalAmountForCycle,
-                            name = tempBillingCycleName, // Update with temporary name
-                            isSynced = true
-                        )
-                        billingCycleDao.updateBillingCycle(updatedCycle)
-                        android.util.Log.d("BillingCycleRepository", "Updated existing main billing cycle: $consistentBillingCycleId - ${updatedCycle.name} - Total: ₹${updatedCycle.totalAmount}")
-                    } else {
-                        android.util.Log.d("BillingCycleRepository", "Skipped existing main billing cycle (no changes): $consistentBillingCycleId")
-                    }
-                }
-
-                // Insert/update individual FarmerBillingDetail objects
-                for (farmerDetail in farmerDetailsList) {
-                    val existingFarmerDetail = farmerBillingDetailDao.getFarmerBillingDetailsByBillingCycleId(farmerDetail.billingCycleId)
-                        .firstOrNull { it.farmerId == farmerDetail.farmerId }
-
-                    if (existingFarmerDetail == null) {
-                        farmerBillingDetailDao.insertFarmerBillingDetail(farmerDetail)
-                        totalFarmerDetailsRestored++
-                        android.util.Log.d("BillingCycleRepository", "Restored farmer billing detail: ${farmerDetail.farmerName} - Cycle: ${farmerDetail.billingCycleId} - Amount: ₹${farmerDetail.originalAmount}")
-                    } else {
-                        if (existingFarmerDetail.originalAmount != farmerDetail.originalAmount ||
-                            existingFarmerDetail.paidAmount != farmerDetail.paidAmount ||
-                            existingFarmerDetail.balanceAmount != farmerDetail.balanceAmount ||
-                            existingFarmerDetail.isPaid != farmerDetail.isPaid) {
-                            val updatedFarmerDetail = existingFarmerDetail.copy(
-                                originalAmount = farmerDetail.originalAmount,
-                                paidAmount = farmerDetail.paidAmount,
-                                balanceAmount = farmerDetail.balanceAmount,
-                                isPaid = farmerDetail.isPaid,
-                                isSynced = true
-                            )
-                            farmerBillingDetailDao.updateFarmerBillingDetail(updatedFarmerDetail)
-                            android.util.Log.d("BillingCycleRepository", "Updated existing farmer billing detail: ${farmerDetail.farmerName} - Cycle: ${farmerDetail.billingCycleId}")
-                        } else {
-                            android.util.Log.d("BillingCycleRepository", "Skipped existing farmer billing detail (no changes): ${farmerDetail.farmerName} - Cycle: ${farmerDetail.billingCycleId}")
-                        }
-                    }
-                }
-            }
-
-            android.util.Log.d("BillingCycleRepository", "Successfully restored $totalBillingCyclesRestored main billing cycles and $totalFarmerDetailsRestored farmer details from Firestore")
-
-            // Ensure all farmers have billing cycles for the current month (this will now use the correctly restored main cycles)
-            ensureAllFarmersHaveBillingCycles()
-
-            // Force cleanup all duplicates (based on date range)
-            forceCleanupAllDuplicates()
-
-            // Fix billing cycle names to ensure proper formatting (this should be the last step for names)
-            fixBillingCycleNames()
-
-            // Regular cleanup (might be redundant after forceCleanup and fixNames, but keep for safety)
-            cleanupDuplicateData()
-
-        } catch (e: Exception) {
-            android.util.Log.e("BillingCycleRepository", "Error restoring billing cycles from Firestore: ${e.message}")
-            android.util.Log.e("BillingCycleRepository", "Stack trace: ${e.stackTraceToString()}")
         }
     }
 
@@ -937,11 +813,11 @@ class BillingCycleRepository(private val context: Context) {
             var migratedCount = 0
             
             for (doc in globalBillingCyclesSnapshot.documents) {
-                try {
-                    val data = doc.data
-                    if (data != null) {
-                        val billingCycleId = doc.id
-                        
+                        try {
+                            val data = doc.data
+                            if (data != null) {
+                                val billingCycleId = doc.id
+                                
                         // Check if this billing cycle has farmer information
                         val farmerId = data["farmer_id"] as? String
                         if (farmerId != null) {
@@ -1045,23 +921,113 @@ class BillingCycleRepository(private val context: Context) {
             
             var fixedCount = 0
             
-            for (cycle in allBillingCycles) {
-                // Check if the name follows the proper format
-                val properName = generateBillingCycleName(cycle.startDate, allBillingCycles.filter { it.id != cycle.id })
+            // Group cycles by month and year to properly number them
+            val cyclesByMonth = allBillingCycles.groupBy { cycle ->
+                val calendar = Calendar.getInstance()
+                calendar.time = cycle.startDate
+                "${calendar.get(Calendar.YEAR)}-${calendar.get(Calendar.MONTH)}"
+            }
+            
+            for ((monthKey, cyclesInMonth) in cyclesByMonth) {
+                android.util.Log.d("BillingCycleRepository", "Processing month: $monthKey with ${cyclesInMonth.size} cycles")
                 
-                if (cycle.name != properName) {
-                    android.util.Log.d("BillingCycleRepository", "Fixing billing cycle name: '${cycle.name}' -> '$properName'")
+                // Sort cycles by start date to ensure proper ordering
+                val sortedCycles = cyclesInMonth.sortedBy { it.startDate }
+                
+                for ((index, cycle) in sortedCycles.withIndex()) {
+                    val cycleNumber = index + 1
+                    val calendar = Calendar.getInstance()
+                    calendar.time = cycle.startDate
+                    val monthAbbr = SimpleDateFormat("MMM", Locale.getDefault()).format(cycle.startDate).lowercase(Locale.getDefault())
                     
-                    val updatedCycle = cycle.copy(name = properName)
-                    billingCycleDao.updateBillingCycle(updatedCycle)
-                    fixedCount++
+                    val ordinal = when (cycleNumber) {
+                        1 -> "1st"
+                        2 -> "2nd"
+                        3 -> "3rd"
+                        else -> "${cycleNumber}th"
+                    }
+                    
+                    val properName = "$ordinal billing_cycle:$monthAbbr"
+                    
+                    if (cycle.name != properName) {
+                        android.util.Log.d("BillingCycleRepository", "Fixing billing cycle name: '${cycle.name}' -> '$properName' (cycle #$cycleNumber in $monthAbbr)")
+                        
+                        val updatedCycle = cycle.copy(name = properName)
+                        billingCycleDao.updateBillingCycle(updatedCycle)
+                        fixedCount++
+                    } else {
+                        android.util.Log.d("BillingCycleRepository", "Billing cycle name is already correct: '${cycle.name}'")
+                    }
                 }
             }
             
             android.util.Log.d("BillingCycleRepository", "Fixed $fixedCount billing cycle names")
             
-        } catch (e: Exception) {
+                        } catch (e: Exception) {
             android.util.Log.e("BillingCycleRepository", "Error fixing billing cycle names: ${e.message}")
+        }
+    }
+
+    /**
+     * Clean up corrupted billing cycle documents from individual farmer profiles
+     * This removes the billing_cycle collections that were incorrectly created inside farmer profiles
+     */
+    suspend fun cleanupCorruptedBillingCycleDocuments() = withContext(Dispatchers.IO) {
+        try {
+            android.util.Log.d("BillingCycleRepository", "Starting cleanup of corrupted billing cycle documents from farmer profiles")
+            
+            val userId = authViewModel.getStoredUser(context)?.userId
+            if (userId == null) {
+                android.util.Log.e("BillingCycleRepository", "Cannot cleanup corrupted documents: User not authenticated")
+                return@withContext
+            }
+            
+            if (!networkUtils.isCurrentlyOnline()) {
+                android.util.Log.d("BillingCycleRepository", "Network not available, skipping cleanup")
+                return@withContext
+            }
+            
+            val allFarmers = farmerRepository.getAllFarmers()
+            android.util.Log.d("BillingCycleRepository", "Found ${allFarmers.size} farmers to check for corrupted billing cycle documents")
+            
+            var cleanedCount = 0
+            
+            for (farmer in allFarmers) {
+                try {
+                    // Check if this farmer has a billing_cycle collection (which is corrupted)
+                    val billingCycleCollection = firestore.collection("users")
+                        .document(userId)
+                        .collection("farmers")
+                        .document(farmer.id)
+                        .collection("billing_cycle")
+                    
+                    val documents = billingCycleCollection.get().await()
+                    
+                    if (documents.documents.isNotEmpty()) {
+                        android.util.Log.d("BillingCycleRepository", "Found ${documents.documents.size} corrupted billing cycle documents for farmer ${farmer.id} (${farmer.name})")
+                        
+                        // Delete all documents in the billing_cycle collection
+                        for (doc in documents.documents) {
+                            try {
+                                doc.reference.delete().await()
+                                android.util.Log.d("BillingCycleRepository", "Deleted corrupted billing cycle document: ${doc.id} for farmer ${farmer.id}")
+                } catch (e: Exception) {
+                                android.util.Log.e("BillingCycleRepository", "Error deleting document ${doc.id}: ${e.message}")
+                            }
+                        }
+                        
+                        cleanedCount++
+                        android.util.Log.d("BillingCycleRepository", "Cleaned up corrupted billing cycle documents for farmer ${farmer.id}")
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("BillingCycleRepository", "Error checking farmer ${farmer.id} for corrupted documents: ${e.message}")
+                }
+            }
+            
+            android.util.Log.d("BillingCycleRepository", "Cleanup completed. Cleaned corrupted documents from $cleanedCount farmers")
+            
+        } catch (e: Exception) {
+            android.util.Log.e("BillingCycleRepository", "Error during cleanup of corrupted billing cycle documents: ${e.message}")
         }
     }
 }

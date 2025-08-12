@@ -6,6 +6,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -37,11 +38,13 @@ import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.ui.graphics.Color.Companion.LightGray
+import com.example.doodhsethu.data.models.FarmerMilkDetail
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MilkReportsScreen(
-    onNavigateBack: () -> Unit
+    onNavigateBack: () -> Unit,
+    onNavigateToFarmerDetails: (String) -> Unit = {}
 ) {
     var showCustomDateDialog by remember { mutableStateOf(false) }
     val context = LocalContext.current
@@ -51,11 +54,16 @@ fun MilkReportsScreen(
     
     // Collect ViewModel states
     val reportEntries by viewModel.reportEntries.collectAsState()
+    val farmerDetails by viewModel.farmerDetails.collectAsState()
+    val selectedDate by viewModel.selectedDate.collectAsState()
 
     val isLoading by viewModel.isLoading.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
     val isOnline by GlobalNetworkManager.getNetworkStatus().collectAsState()
     val selectedPeriod by viewModel.selectedPeriod.collectAsState()
+    
+
+
     
     // Load data when screen is first shown
     LaunchedEffect(Unit) {
@@ -173,7 +181,13 @@ fun MilkReportsScreen(
                         // Table Data
                         items(reportEntries.size) { index ->
                             val entry = reportEntries[index]
-                            ReportTableRow(entry = entry, index = index)
+                            ReportTableRow(
+                                entry = entry, 
+                                index = index,
+                                onClick = {
+                                    onNavigateToFarmerDetails(entry.date)
+                                }
+                            )
                         }
                         
 
@@ -192,6 +206,10 @@ fun MilkReportsScreen(
                 }
             )
         }
+        
+
+        
+
     }
 }
 
@@ -522,7 +540,7 @@ fun ReportTableHeader() {
 }
 
 @Composable
-fun ReportTableRow(entry: MilkReportEntry, index: Int) {
+fun ReportTableRow(entry: MilkReportEntry, index: Int, onClick: () -> Unit) {
     val animatedOffset by animateFloatAsState(
         targetValue = 0f,
         animationSpec = tween(
@@ -538,7 +556,8 @@ fun ReportTableRow(entry: MilkReportEntry, index: Int) {
             .offset(y = (animatedOffset * 20).dp)
             .animateContentSize(
                 animationSpec = tween(durationMillis = 300)
-            ),
+            )
+            .clickable { onClick() },
         colors = CardDefaults.cardColors(
             containerColor = if (index % 2 == 0) White else Color(0xFFF8F9FA)
         ),
@@ -572,7 +591,7 @@ fun ReportTableRow(entry: MilkReportEntry, index: Int) {
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = if (entry.amQuantity > 0) "${entry.amQuantity}L\n(₹${entry.amPrice})" else "0L\n(₹0)",
+                                            text = if (entry.amQuantity > 0) "${String.format(Locale.getDefault(), "%.2f", entry.amQuantity)}L\n(₹${String.format(Locale.getDefault(), "%.2f", entry.amPrice)})" else "0L\n(₹0)",
                     fontFamily = PoppinsFont,
                     fontWeight = FontWeight.Medium,
                     fontSize = 11.sp,
@@ -588,7 +607,7 @@ fun ReportTableRow(entry: MilkReportEntry, index: Int) {
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = if (entry.pmQuantity > 0) "${entry.pmQuantity}L\n(₹${entry.pmPrice})" else "0L\n(₹0)",
+                                            text = if (entry.pmQuantity > 0) "${String.format(Locale.getDefault(), "%.2f", entry.pmQuantity)}L\n(₹${String.format(Locale.getDefault(), "%.2f", entry.pmPrice)})" else "0L\n(₹0)",
                     fontFamily = PoppinsFont,
                     fontWeight = FontWeight.Medium,
                     fontSize = 11.sp,
@@ -604,7 +623,7 @@ fun ReportTableRow(entry: MilkReportEntry, index: Int) {
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = if (entry.totalQuantity > 0) "${entry.totalQuantity}L\n(₹${entry.totalPrice})" else "0L\n(₹0)",
+                                            text = if (entry.totalQuantity > 0) "${String.format(Locale.getDefault(), "%.2f", entry.totalQuantity)}L\n(₹${String.format(Locale.getDefault(), "%.2f", entry.totalPrice)})" else "0L\n(₹0)",
                     fontFamily = PoppinsFont,
                     fontWeight = FontWeight.Bold,
                     fontSize = 11.sp,
@@ -628,5 +647,9 @@ private fun formatDate(dateStr: String): String {
         dateStr
     }
 }
+
+
+
+
 
  

@@ -171,9 +171,10 @@ class FarmerProfileViewModel(context: Context) : ViewModel() {
                 // Load billing cycle summaries from Firestore in background (non-blocking)
                 viewModelScope.launch {
                     try {
-                        val billingSummaries = billingCycleSummaryRepository.getAllBillingCycleSummaries(farmerId)
-                        _billingCycleSummaries.value = billingSummaries
-                        Log.d(TAG, "Loaded ${billingSummaries.size} billing cycle summaries from Firestore (background)")
+                        // DISABLED: This was accessing corrupted billing cycle documents inside farmer profiles
+                        // val billingSummaries = billingCycleSummaryRepository.getAllBillingCycleSummaries(farmerId)
+                        // _billingCycleSummaries.value = billingSummaries
+                        Log.d(TAG, "Billing cycle summaries loading DISABLED to prevent corruption")
                     } catch (e: Exception) {
                         Log.e(TAG, "Background Firestore sync failed: ${e.message}")
                         // Don't show error to user since local data is already loaded
@@ -300,13 +301,14 @@ class FarmerProfileViewModel(context: Context) : ViewModel() {
                     // Check if collection date falls within this billing cycle
                     if (collectionDate != null && collectionDate >= startDate && collectionDate <= endDate) {
                         // Update the billing cycle summary
-                        billingCycleSummaryRepository.updateBillingCycleSummary(
-                            billingCycleId = billingCycle.billingCycleId,
-                            farmerId = farmerId,
-                            milkCollection = milkCollection
-                        )
+                        // DISABLED: This was creating corrupted billing cycle documents inside farmer profiles
+                        // billingCycleSummaryRepository.updateBillingCycleSummary(
+                        //     billingCycleId = billingCycle.billingCycleId,
+                        //     farmerId = farmerId,
+                        //     milkCollection = milkCollection
+                        // )
                         
-                        Log.d(TAG, "Updated billing cycle summary for cycle: ${billingCycle.billingCycleId}")
+                        Log.d(TAG, "Billing cycle summary update DISABLED to prevent corruption")
                         break
                     }
                 }
@@ -337,14 +339,15 @@ class FarmerProfileViewModel(context: Context) : ViewModel() {
                 // Initialize billing cycle summaries for all farmers
                 val allFarmers = farmerRepository.getAllFarmers()
                 for (farmer in allFarmers) {
-                    billingCycleSummaryRepository.initializeBillingCycleSummary(
-                        billingCycleId = billingCycle.id,
-                        farmerId = farmer.id,
-                        farmerName = farmer.name
-                    )
+                    // DISABLED: This was creating corrupted billing cycle documents inside farmer profiles
+                    // billingCycleSummaryRepository.initializeBillingCycleSummary(
+                    //     billingCycleId = billingCycle.id,
+                    //     farmerId = farmer.id,
+                    //     farmerName = farmer.name
+                    // )
                 }
                 
-                Log.d(TAG, "Created billing cycle and initialized summaries for ${allFarmers.size} farmers")
+                Log.d(TAG, "Created billing cycle (summaries initialization DISABLED to prevent corruption)")
                 
                 // Refresh current farmer profile if we're viewing one
                 _farmer.value?.let { farmer ->
@@ -381,13 +384,14 @@ class FarmerProfileViewModel(context: Context) : ViewModel() {
                 
                 // Delete billing cycle summaries for all farmers
                 for (farmer in allFarmers) {
-                    billingCycleSummaryRepository.deleteBillingCycleSummary(
-                        billingCycleId = billingCycleId,
-                        farmerId = farmer.id
-                    )
+                    // DISABLED: This was accessing corrupted billing cycle documents inside farmer profiles
+                    // billingCycleSummaryRepository.deleteBillingCycleSummary(
+                    //     billingCycleId = billingCycleId,
+                    //     farmerId = farmer.id
+                    // )
                 }
                 
-                Log.d(TAG, "Deleted billing cycle and summaries for ${allFarmers.size} farmers")
+                Log.d(TAG, "Deleted billing cycle (summaries deletion DISABLED to prevent corruption)")
                 
                 // Refresh current farmer profile if we're viewing one
                 _farmer.value?.let { farmer ->
@@ -427,14 +431,15 @@ class FarmerProfileViewModel(context: Context) : ViewModel() {
                     
                     for (farmerDetail in farmerDetails) {
                         Log.d(TAG, "Initializing summary for farmer ${farmerDetail.farmerId} with amount ₹${farmerDetail.originalAmount}")
-                        billingCycleSummaryRepository.initializeBillingCycleSummary(
-                            billingCycleId = billingCycle.id,
-                            farmerId = farmerDetail.farmerId,
-                            farmerName = farmerDetail.farmerName,
-                            totalAmount = farmerDetail.originalAmount,
-                            totalMilk = 0.0,
-                            totalFat = 0.0
-                        )
+                        // DISABLED: This was creating corrupted billing cycle documents inside farmer profiles
+                        // billingCycleSummaryRepository.initializeBillingCycleSummary(
+                        //     billingCycleId = billingCycle.id,
+                        //     farmerId = farmerDetail.farmerId,
+                        //     farmerName = farmerDetail.farmerName,
+                        //     totalAmount = farmerDetail.originalAmount,
+                        //     totalMilk = 0.0,
+                        //     totalFat = 0.0
+                        // )
                     }
                 }
                 

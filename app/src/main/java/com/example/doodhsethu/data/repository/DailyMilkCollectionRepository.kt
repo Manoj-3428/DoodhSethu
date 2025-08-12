@@ -56,7 +56,7 @@ class DailyMilkCollectionRepository(private val context: Context) {
             
             val dailyCollection = if (existingCollection != null) {
                 // Update existing collection
-                existingCollection.copy(
+                val updatedCollection = existingCollection.copy(
                     amMilk = amMilk,
                     amFat = amFat,
                     amPrice = amPrice,
@@ -69,9 +69,12 @@ class DailyMilkCollectionRepository(private val context: Context) {
                     updatedAt = Date(),
                     isSynced = false
                 )
+                // Update the existing collection
+                dailyMilkCollectionDao.updateDailyMilkCollection(updatedCollection)
+                updatedCollection
             } else {
                 // Create new collection
-                DailyMilkCollection(
+                val newCollection = DailyMilkCollection(
                     date = today,
                     farmerId = farmerId,
                     farmerName = farmerName,
@@ -86,10 +89,10 @@ class DailyMilkCollectionRepository(private val context: Context) {
                     totalAmount = totalAmount,
                     isSynced = false
                 )
+                // Insert the new collection
+                dailyMilkCollectionDao.insertDailyMilkCollection(newCollection)
+                newCollection
             }
-
-            // Save to local database first (immediate response for user)
-            dailyMilkCollectionDao.insertDailyMilkCollection(dailyCollection)
             android.util.Log.d("DailyMilkCollectionRepository", "Saved daily collection locally: ${dailyCollection.farmerName} - ${dailyCollection.date} - Total Amount: ₹${dailyCollection.totalAmount}")
 
             // Return immediately - don't block UI
@@ -452,6 +455,17 @@ class DailyMilkCollectionRepository(private val context: Context) {
         }
     }
     
+    // Clean up duplicate milk collections
+    suspend fun cleanupDuplicateCollections() = withContext(Dispatchers.IO) {
+        try {
+            android.util.Log.d("DailyMilkCollectionRepository", "Starting cleanup of duplicate milk collections")
+            dailyMilkCollectionDao.removeDuplicateEntries()
+            android.util.Log.d("DailyMilkCollectionRepository", "Successfully cleaned up duplicate collections")
+        } catch (e: Exception) {
+            android.util.Log.e("DailyMilkCollectionRepository", "Error cleaning up duplicate collections: ${e.message}")
+        }
+    }
+
     // Clean up orphaned milk collections (collections from deleted farmers)
     suspend fun cleanupOrphanedCollections() = withContext(Dispatchers.IO) {
         try {
@@ -513,8 +527,42 @@ class DailyMilkCollectionRepository(private val context: Context) {
                     android.util.Log.d("DailyMilkCollectionRepository", "Valid Collection: ${collection.date} - Farmer: ${collection.farmerId} - AM: ${collection.amMilk}L(₹${collection.amPrice}) PM: ${collection.pmMilk}L(₹${collection.pmPrice})")
                 }
                 
+                // Debug: Check for duplicate farmers on same date
+                val farmersByDate = validCollections.groupBy { it.date }
+                farmersByDate.forEach { (date, collections) ->
+                    val farmers = collections.map { it.farmerId }.distinct()
+                    if (farmers.size != collections.size) {
+                        android.util.Log.w("DailyMilkCollectionRepository", "DUPLICATE DETECTED: Date $date has ${collections.size} collections but only ${farmers.size} unique farmers")
+                        collections.groupBy { it.farmerId }.forEach { (farmerId, farmerCollections) ->
+                            if (farmerCollections.size > 1) {
+                                android.util.Log.w("DailyMilkCollectionRepository", "Farmer $farmerId has ${farmerCollections.size} collections on $date")
+                                farmerCollections.forEachIndexed { index, collection ->
+                                    android.util.Log.w("DailyMilkCollectionRepository", "  Collection $index: AM: ${collection.amMilk}L PM: ${collection.pmMilk}L")
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Clean up duplicates before processing
+                try {
+                    android.util.Log.d("DailyMilkCollectionRepository", "Cleaning up duplicates before generating report")
+                    dailyMilkCollectionDao.removeDuplicateEntries()
+                    android.util.Log.d("DailyMilkCollectionRepository", "Duplicate cleanup completed")
+                } catch (e: Exception) {
+                    android.util.Log.e("DailyMilkCollectionRepository", "Error cleaning up duplicates: ${e.message}")
+                }
+                
+                // Reload collections after cleanup to get the deduplicated data
+                val cleanedCollections = dailyMilkCollectionDao.getDailyMilkCollectionsByDateRange(startDateStr, endDateStr)
+                val cleanedValidCollections = cleanedCollections.filter { collection ->
+                    existingFarmerIds.contains(collection.farmerId)
+                }
+                
+                android.util.Log.d("DailyMilkCollectionRepository", "After cleanup: ${cleanedValidCollections.size} valid collections")
+                
                 val reportEntries = mutableListOf<MilkReportEntry>()
-                val collectionsByDate = validCollections.groupBy { it.date }
+                val collectionsByDate = cleanedValidCollections.groupBy { it.date }
                 
                 android.util.Log.d("DailyMilkCollectionRepository", "Grouped into ${collectionsByDate.size} unique dates")
                 
@@ -522,8 +570,18 @@ class DailyMilkCollectionRepository(private val context: Context) {
                     // Sum up all collections for this date
                     val totalAmQuantity = dateCollections.sumOf { it.amMilk }
                     val totalPmQuantity = dateCollections.sumOf { it.pmMilk }
-                    val totalAmFat = if (dateCollections.isNotEmpty()) dateCollections.sumOf { it.amFat } / dateCollections.size else 0.0
-                    val totalPmFat = if (dateCollections.isNotEmpty()) dateCollections.sumOf { it.pmFat } / dateCollections.size else 0.0
+                    
+                    // Calculate weighted average fat based on milk quantity
+                    val totalAmFat = if (totalAmQuantity > 0) {
+                        val weightedFatSum = dateCollections.sumOf { it.amMilk * it.amFat }
+                        weightedFatSum / totalAmQuantity
+                    } else 0.0
+                    
+                    val totalPmFat = if (totalPmQuantity > 0) {
+                        val weightedFatSum = dateCollections.sumOf { it.pmMilk * it.pmFat }
+                        weightedFatSum / totalPmQuantity
+                    } else 0.0
+                    
                     val totalAmPrice = dateCollections.sumOf { it.amPrice }
                     val totalPmPrice = dateCollections.sumOf { it.pmPrice }
                     
@@ -596,6 +654,93 @@ class DailyMilkCollectionRepository(private val context: Context) {
     }
 
     /**
+     * Get detailed farmer milk collection data for a specific date
+     */
+    suspend fun getFarmerMilkDetailsForDate(date: String): List<FarmerMilkDetail> {
+        return withContext(Dispatchers.IO) {
+            try {
+                android.util.Log.d("DailyMilkCollectionRepository", "Getting farmer milk details for date: $date")
+                
+                val collections = dailyMilkCollectionDao.getDailyMilkCollectionsByDate(date)
+                android.util.Log.d("DailyMilkCollectionRepository", "Found ${collections.size} collections for date: $date")
+                
+                // Filter out collections from deleted farmers
+                val farmerRepository = FarmerRepository(context)
+                val existingFarmers = farmerRepository.getAllFarmers()
+                val existingFarmerIds = existingFarmers.map { it.id }.toSet()
+                
+                val validCollections = collections.filter { collection ->
+                    existingFarmerIds.contains(collection.farmerId)
+                }
+                
+                android.util.Log.d("DailyMilkCollectionRepository", "After filtering deleted farmers: ${validCollections.size} valid collections")
+                
+                // Clean up duplicates before processing
+                try {
+                    android.util.Log.d("DailyMilkCollectionRepository", "Cleaning up duplicates before getting farmer details")
+                    dailyMilkCollectionDao.removeDuplicateEntries()
+                    android.util.Log.d("DailyMilkCollectionRepository", "Duplicate cleanup completed")
+                } catch (e: Exception) {
+                    android.util.Log.e("DailyMilkCollectionRepository", "Error cleaning up duplicates: ${e.message}")
+                }
+                
+                // Reload collections after cleanup to get the deduplicated data
+                val cleanedCollections = dailyMilkCollectionDao.getDailyMilkCollectionsByDate(date)
+                val cleanedValidCollections = cleanedCollections.filter { collection ->
+                    existingFarmerIds.contains(collection.farmerId)
+                }
+                
+                android.util.Log.d("DailyMilkCollectionRepository", "After cleanup: ${cleanedValidCollections.size} valid collections")
+                
+                // Group collections by farmer to avoid duplicates
+                val groupedCollections = cleanedValidCollections.groupBy { it.farmerId }
+                
+                val farmerDetails = groupedCollections.map { (farmerId, collections) ->
+                    // Get the first collection (they should all have the same farmer info)
+                    val firstCollection = collections.first()
+                    
+                    // Sum up all AM and PM data for this farmer on this date
+                    val totalAmMilk = collections.sumOf { it.amMilk }
+                    val totalPmMilk = collections.sumOf { it.pmMilk }
+                    
+                    // Calculate weighted average fat based on milk quantity
+                    val totalAmFat = if (totalAmMilk > 0) {
+                        val weightedFatSum = collections.sumOf { it.amMilk * it.amFat }
+                        weightedFatSum / totalAmMilk
+                    } else 0.0
+                    
+                    val totalPmFat = if (totalPmMilk > 0) {
+                        val weightedFatSum = collections.sumOf { it.pmMilk * it.pmFat }
+                        weightedFatSum / totalPmMilk
+                    } else 0.0
+                    
+                    val totalAmPrice = collections.sumOf { it.amPrice }
+                    val totalPmPrice = collections.sumOf { it.pmPrice }
+                    
+                    FarmerMilkDetail(
+                        farmerId = farmerId,
+                        farmerName = firstCollection.farmerName,
+                        amMilk = totalAmMilk,
+                        amFat = totalAmFat,
+                        amPrice = totalAmPrice,
+                        pmMilk = totalPmMilk,
+                        pmFat = totalPmFat,
+                        pmPrice = totalPmPrice,
+                        totalMilk = totalAmMilk + totalPmMilk,
+                        totalPrice = totalAmPrice + totalPmPrice
+                    )
+                }
+                
+                android.util.Log.d("DailyMilkCollectionRepository", "Generated ${farmerDetails.size} farmer details")
+                farmerDetails
+            } catch (e: Exception) {
+                android.util.Log.e("DailyMilkCollectionRepository", "Error getting farmer milk details: ${e.message}")
+                emptyList()
+            }
+        }
+    }
+    
+    /**
      * Update billing cycle summaries when a milk collection is added
      */
     private suspend fun updateBillingCycleSummariesForCollection(dailyCollection: DailyMilkCollection) {
@@ -629,12 +774,13 @@ class DailyMilkCollectionRepository(private val context: Context) {
                         // Update the billing cycle summary in background to avoid blocking UI
                         CoroutineScope(Dispatchers.IO).launch {
                             try {
-                                billingCycleSummaryRepository.updateBillingCycleSummary(
-                                    billingCycleId = billingCycle.billingCycleId,
-                                    farmerId = dailyCollection.farmerId,
-                                    milkCollection = dailyCollection
-                                )
-                                android.util.Log.d("DailyMilkCollectionRepository", "Successfully updated billing cycle summary for cycle: ${billingCycle.billingCycleId}")
+                                // DISABLED: This was creating corrupted billing cycle documents inside farmer profiles
+                                // billingCycleSummaryRepository.updateBillingCycleSummary(
+                                //     billingCycleId = billingCycle.billingCycleId,
+                                //     farmerId = dailyCollection.farmerId,
+                                //     milkCollection = dailyCollection
+                                // )
+                                android.util.Log.d("DailyMilkCollectionRepository", "Billing cycle summary update DISABLED to prevent corruption")
                             } catch (e: Exception) {
                                 android.util.Log.e("DailyMilkCollectionRepository", "Error updating billing cycle summary: ${e.message}")
                             }

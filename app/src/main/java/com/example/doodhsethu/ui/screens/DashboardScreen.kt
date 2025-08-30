@@ -101,7 +101,7 @@ fun DashboardScreen(
             TopAppBar(
                 title = {
                     Text(
-                        text = "DoodhSethu",
+                        text = "Farmers",
                         fontFamily = PoppinsFont,
                         fontWeight = FontWeight.Bold,
                         fontSize = 20.sp,
@@ -157,7 +157,7 @@ fun DashboardScreen(
                     selectedItem = selectedNavItem,
                     onItemClick = { item ->
                         selectedNavItem = item
-                        isDrawerOpen = false
+                        // Keep drawer open; only the hamburger toggles it
                         when (item) {
                             NavigationItem.AddFarmer -> onNavigateToAddFarmer()
                             NavigationItem.Profile -> onNavigateToProfile()
@@ -337,14 +337,13 @@ fun SideNavigationDrawer(
     onItemClick: (NavigationItem) -> Unit
 ) {
     val navItems = listOf(
-        NavigationItem.Home,
-        NavigationItem.AddFarmer,
-        NavigationItem.MilkCollection,
+        NavigationItem.MilkCollection, // Top/Home
+        NavigationItem.Home, // Farmers
         NavigationItem.FatTable,
-        NavigationItem.Profile,
         NavigationItem.Reports,
         NavigationItem.UserReports,
-        NavigationItem.BillingCycles
+        NavigationItem.BillingCycles,
+        NavigationItem.Profile // Bottom
     )
     
     Card(
@@ -406,7 +405,7 @@ fun NavigationItemComposable(
         ) {
             Icon(
                 painter = painterResource(id = when (item) {
-                    NavigationItem.Home -> R.drawable.ic_home
+                    NavigationItem.Home -> R.drawable.ic_groups
                     NavigationItem.AddFarmer -> R.drawable.ic_person_add
                     NavigationItem.MilkCollection -> R.drawable.ic_local_drink
                     NavigationItem.FatTable -> R.drawable.ic_assessment

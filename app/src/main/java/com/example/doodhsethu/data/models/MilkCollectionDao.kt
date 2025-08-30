@@ -21,6 +21,9 @@ interface MilkCollectionDao {
     @Query("SELECT * FROM milk_collections WHERE isSynced = 0")
     suspend fun getUnsyncedMilkCollections(): List<MilkCollection>
     
+    @Query("SELECT * FROM milk_collections WHERE id = :id")
+    suspend fun getMilkCollectionById(id: String): MilkCollection?
+    
     @Query("UPDATE milk_collections SET isSynced = 1 WHERE id IN (:ids)")
     suspend fun markMilkCollectionsAsSynced(ids: List<String>)
     

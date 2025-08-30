@@ -220,7 +220,7 @@ fun UserReportsScreen(
                     label = { Text("Enter Farmer ID", fontFamily = PoppinsFont) },
                     modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Text,
+                        keyboardType = KeyboardType.Number,
                         imeAction = ImeAction.Search
                     ),
                     keyboardActions = KeyboardActions(
@@ -444,7 +444,7 @@ fun DailyMilkCollectionTable(dailyCollections: List<DailyMilkCollectionData>) {
             TableCell(text = "PM Fat (%)", weight = 0.12f, isHeader = true)
             TableCell(text = "PM Amount (₹)", weight = 0.12f, isHeader = true)
             TableCell(text = "Total (₹)", weight = 0.12f, isHeader = true)
-            TableCell(text = "Status", weight = 0.1f, isHeader = true)
+            // Pending/Status column removed per requirement
         }
         
         // Table content
@@ -466,26 +466,16 @@ fun DailyMilkCollectionTable(dailyCollections: List<DailyMilkCollectionData>) {
                     TableCell(text = collection.date, weight = 0.15f)
                     TableCell(text = String.format("%.1f", collection.amMilk), weight = 0.12f)
                     TableCell(text = String.format("%.1f", collection.amFat), weight = 0.12f)
-                    TableCell(text = String.format("%.0f", collection.amAmount), weight = 0.12f)
+                    TableCell(text = String.format("%.2f", collection.amAmount), weight = 0.12f)
                     TableCell(text = String.format("%.1f", collection.pmMilk), weight = 0.12f)
                     TableCell(text = String.format("%.1f", collection.pmFat), weight = 0.12f)
-                    TableCell(text = String.format("%.0f", collection.pmAmount), weight = 0.12f)
+                    TableCell(text = String.format("%.2f", collection.pmAmount), weight = 0.12f)
                     TableCell(
-                        text = String.format("%.0f", collection.totalAmount),
+                        text = String.format("%.2f", collection.totalAmount),
                         weight = 0.12f,
                         isBold = true
                     )
-                    TableCell(
-                        text = collection.paymentStatus,
-                        weight = 0.1f,
-                        isBold = collection.paymentStatus == "Paid",
-                        textColor = when (collection.paymentStatus) {
-                            "Paid" -> Color.Green
-                            "Pending" -> Color.Red
-                            "No Data" -> Color.Gray
-                            else -> Color.Black
-                        }
-                    )
+                    // Pending/Status column removed per requirement
                 }
             }
         }
@@ -513,7 +503,7 @@ fun DailyMilkCollectionTable(dailyCollections: List<DailyMilkCollectionData>) {
                     isHeader = true
                 )
                 TableCell(
-                    text = String.format("₹%.0f", totalAmount),
+                    text = String.format("₹%.2f", totalAmount),
                     weight = 0.25f,
                     isHeader = true
                 )
@@ -557,5 +547,5 @@ data class DailyMilkCollectionData(
     val pmFat: Double,
     val pmAmount: Double,
     val totalAmount: Double,
-    val paymentStatus: String // "Pending" or "Paid"
+    val paymentStatus: String // kept for logic; not displayed in UI
 )

@@ -1,6 +1,11 @@
 package com.example.doodhsethu.ui.screens
 
 import android.widget.Toast
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.EaseOutCubic
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.animateContentSize
@@ -52,13 +57,47 @@ fun MilkReportsScreen(
         factory = MilkReportViewModelFactory(context)
     )
     
+    // Permission launcher for storage access
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        android.util.Log.d("MilkReportsScreen", "Permission result: $permissions")
+        val allGranted = permissions.values.all { it }
+        if (allGranted) {
+            // Permission granted, proceed with export
+            android.util.Log.d("MilkReportsScreen", "All permissions granted, proceeding with export")
+            viewModel.exportToExcel()
+        } else {
+            // Permission denied
+            android.util.Log.d("MilkReportsScreen", "Some permissions denied")
+            Toast.makeText(context, "Storage permission required to export Excel file", Toast.LENGTH_LONG).show()
+        }
+    }
+    
+    // Notification permission launcher for Android 13+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        android.util.Log.d("MilkReportsScreen", "Notification permission result: $isGranted")
+        if (isGranted) {
+            // Notification permission granted, proceed with export
+            viewModel.exportToExcel()
+        } else {
+            // Notification permission denied, still proceed with export but without notification
+            viewModel.exportToExcel()
+        }
+    }
+    
     // Collect ViewModel states
     val reportEntries by viewModel.reportEntries.collectAsState()
     val farmerDetails by viewModel.farmerDetails.collectAsState()
     val selectedDate by viewModel.selectedDate.collectAsState()
 
     val isLoading by viewModel.isLoading.collectAsState()
+    val isExporting by viewModel.isExporting.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
+    val successMessage by viewModel.successMessage.collectAsState()
+    val showDownloadDialog by viewModel.showDownloadDialog.collectAsState()
     val isOnline by GlobalNetworkManager.getNetworkStatus().collectAsState()
     val selectedPeriod by viewModel.selectedPeriod.collectAsState()
     
@@ -76,6 +115,109 @@ fun MilkReportsScreen(
             Toast.makeText(context, message, Toast.LENGTH_LONG).show()
             viewModel.clearError()
         }
+    }
+    
+    // Handle success messages
+    LaunchedEffect(successMessage) {
+        successMessage?.let { message ->
+            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+            viewModel.clearSuccessMessage()
+        }
+    }
+    
+    // Handle download confirmation dialog
+    if (showDownloadDialog) {
+        AlertDialog(
+            onDismissRequest = { viewModel.hideDownloadDialog() },
+            title = {
+                Text(
+                    text = "Download Report",
+                    fontFamily = PoppinsFont,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+            },
+            text = {
+                Text(
+                    text = "Do you want to download the report?",
+                    fontFamily = PoppinsFont,
+                    fontSize = 16.sp
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.hideDownloadDialog()
+                        // For Android 10+ (API 29+), we don't need storage permissions for Downloads folder
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            android.util.Log.d("MilkReportsScreen", "Android 10+, no storage permissions needed")
+                            // Check notification permission for Android 13+
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                val hasNotificationPermission = androidx.core.content.ContextCompat.checkSelfPermission(
+                                    context, 
+                                    Manifest.permission.POST_NOTIFICATIONS
+                                ) == PackageManager.PERMISSION_GRANTED
+                                
+                                if (hasNotificationPermission) {
+                                    viewModel.exportToExcel()
+                                } else {
+                                    // Request notification permission
+                                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                }
+                            } else {
+                                viewModel.exportToExcel()
+                            }
+                        } else {
+                            // Check if permissions are already granted for older Android versions
+                            val hasWritePermission = androidx.core.content.ContextCompat.checkSelfPermission(
+                                context, 
+                                Manifest.permission.WRITE_EXTERNAL_STORAGE
+                            ) == PackageManager.PERMISSION_GRANTED
+                            
+                            val hasReadPermission = androidx.core.content.ContextCompat.checkSelfPermission(
+                                context, 
+                                Manifest.permission.READ_EXTERNAL_STORAGE
+                            ) == PackageManager.PERMISSION_GRANTED
+                            
+                            android.util.Log.d("MilkReportsScreen", "Write permission: $hasWritePermission, Read permission: $hasReadPermission")
+                            
+                            if (hasWritePermission && hasReadPermission) {
+                                // Permissions already granted, proceed with export
+                                android.util.Log.d("MilkReportsScreen", "Permissions already granted, proceeding with export")
+                                viewModel.exportToExcel()
+                            } else {
+                                // Request permissions
+                                android.util.Log.d("MilkReportsScreen", "Requesting permissions")
+                                permissionLauncher.launch(
+                                    arrayOf(
+                                        Manifest.permission.WRITE_EXTERNAL_STORAGE,
+                                        Manifest.permission.READ_EXTERNAL_STORAGE
+                                    )
+                                )
+                            }
+                        }
+                    }
+                ) {
+                    Text(
+                        text = "Download",
+                        fontFamily = PoppinsFont,
+                        fontWeight = FontWeight.Bold,
+                        color = PrimaryBlue
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { viewModel.hideDownloadDialog() }
+                ) {
+                    Text(
+                        text = "Cancel",
+                        fontFamily = PoppinsFont,
+                        color = Color.Gray
+                    )
+                }
+            }
+        )
     }
     
     Scaffold(
@@ -97,6 +239,30 @@ fun MilkReportsScreen(
                             contentDescription = "Back",
                             tint = White
                         )
+                    }
+                },
+                actions = {
+                    // Excel Export Button
+                    IconButton(
+                        onClick = {
+                            android.util.Log.d("MilkReportsScreen", "Export button clicked")
+                            viewModel.confirmAndExport()
+                        },
+                        enabled = reportEntries.isNotEmpty() && !isLoading && !isExporting
+                    ) {
+                        if (isExporting) {
+                            CircularProgressIndicator(
+                                color = White,
+                                modifier = Modifier.size(24.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_download),
+                                contentDescription = "Export to Excel",
+                                tint = if (reportEntries.isNotEmpty() && !isLoading) White else White.copy(alpha = 0.5f)
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(

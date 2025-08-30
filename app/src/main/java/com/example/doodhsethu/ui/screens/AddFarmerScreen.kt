@@ -71,19 +71,19 @@ fun AddFarmerScreen(
     val farmerViewModel: FarmerViewModel = viewModel(
         factory = FarmerViewModelFactory(context)
     )
-
+    
     // Initialize photo manager
     LaunchedEffect(Unit) {
         farmerViewModel.initializePhotoManager(context)
     }
-
+    
     // Observe ViewModel states
     val isViewModelLoading by farmerViewModel.isLoading.collectAsState()
     val errorMessage by farmerViewModel.errorMessage.collectAsState()
     val successMessage by farmerViewModel.successMessage.collectAsState()
     val isOnline by GlobalNetworkManager.getNetworkStatus().collectAsState()
     val pendingUploads by farmerViewModel.pendingUploads.collectAsState()
-
+    
     // Form state with key to force reset for new farmers
     val formKey = editFarmer?.id ?: "new_farmer_${System.currentTimeMillis()}"
     var name by remember(formKey) { mutableStateOf(editFarmer?.name ?: "") }
@@ -91,7 +91,7 @@ fun AddFarmerScreen(
     var address by remember(formKey) { mutableStateOf(editFarmer?.address ?: "") }
     var photoUri by remember(formKey) { mutableStateOf<android.net.Uri?>(null) }
     var showPhotoDialog by remember { mutableStateOf(false) }
-
+    
     // Reset form fields when editFarmer changes or when screen is first loaded
     LaunchedEffect(editFarmer) {
         android.util.Log.d("AddFarmerScreen", "editFarmer changed: ${editFarmer?.name ?: "null"}")
@@ -114,23 +114,23 @@ fun AddFarmerScreen(
             android.util.Log.d("AddFarmerScreen", "Cleared form for new farmer")
         }
     }
-
+    
     // Photo picker launcher
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
         photoUri = uri
     }
-
+    
     // Camera photo capture launcher
     val cameraImageUri = remember { mutableStateOf<android.net.Uri?>(null) }
     val cameraLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
-            if (success) {
-                photoUri = cameraImageUri.value
-            }
+        if (success) {
+            photoUri = cameraImageUri.value
         }
-
+    }
+    
     // Camera permission launcher
     val cameraPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -152,7 +152,7 @@ fun AddFarmerScreen(
             ).show()
         }
     }
-
+    
     // Handle ViewModel states
     LaunchedEffect(errorMessage) {
         errorMessage?.let { message ->
@@ -160,12 +160,12 @@ fun AddFarmerScreen(
             farmerViewModel.clearMessages()
         }
     }
-
+    
     LaunchedEffect(successMessage) {
         successMessage?.let { message ->
             Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
             farmerViewModel.clearMessages()
-
+            
             // Reset form after successful addition (only for new farmers, not editing)
             if (editFarmer == null) {
                 name = ""
@@ -173,11 +173,11 @@ fun AddFarmerScreen(
                 address = ""
                 photoUri = null
             }
-
+            
             onFarmerAdded()
         }
     }
-
+    
     Scaffold(
         topBar = {
             TopAppBar(
@@ -225,7 +225,7 @@ fun AddFarmerScreen(
                 isOnline = isOnline,
                 modifier = Modifier.padding(bottom = 16.dp)
             )
-
+            
             // Farmer ID Display (for edit mode)
             if (editFarmer != null) {
                 Card(
@@ -249,7 +249,7 @@ fun AddFarmerScreen(
                     )
                 }
             }
-
+            
             // Header
             Text(
                 text = "Farmer Details",
@@ -259,7 +259,7 @@ fun AddFarmerScreen(
                 color = PrimaryBlue,
                 modifier = Modifier.padding(bottom = 24.dp)
             )
-
+            
             // Photo Section
             Card(
                 modifier = Modifier
@@ -308,9 +308,9 @@ fun AddFarmerScreen(
                     }
                 }
             }
-
+            
             Spacer(modifier = Modifier.height(24.dp))
-
+            
             // Form Fields
             Column(
                 modifier = Modifier.fillMaxWidth(),
@@ -323,21 +323,21 @@ fun AddFarmerScreen(
                         animationSpec = tween(600, easing = EaseOutCubic)
                     ) + fadeIn(animationSpec = tween(600)),
                     modifier = Modifier.animateContentSize()
-                ) {
-                    AuthTextField(
-                        value = name,
-                        onValueChange = { name = it },
-                        label = "Full Name",
-                        leadingIcon = {
-                            Icon(
-                                painter = painterResource(id = R.drawable.ic_person),
-                                contentDescription = "Name",
-                                tint = PrimaryBlue,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        },
-                        placeholder = "Enter farmer's full name"
-                    )
+            ) {
+                AuthTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = "Full Name",
+                    leadingIcon = {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_person),
+                            contentDescription = "Name",
+                            tint = PrimaryBlue,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    },
+                    placeholder = "Enter farmer's full name"
+                )
                 }
 
                 AnimatedVisibility(
@@ -348,24 +348,24 @@ fun AddFarmerScreen(
                     ) + fadeIn(animationSpec = tween(600, delayMillis = 100)),
                     modifier = Modifier.animateContentSize()
                 ) {
-                    AuthTextField(
-                        value = phone,
-                        onValueChange = { phone = it },
-                        label = "Phone Number",
-                        leadingIcon = {
-                            Icon(
-                                painter = painterResource(id = R.drawable.ic_phone),
-                                contentDescription = "Phone",
-                                tint = PrimaryBlue,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        },
-                        placeholder = "Enter phone number",
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.Phone,
-                            imeAction = ImeAction.Next
+                AuthTextField(
+                    value = phone,
+                    onValueChange = { phone = it },
+                    label = "Phone Number",
+                    leadingIcon = {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_phone),
+                            contentDescription = "Phone",
+                            tint = PrimaryBlue,
+                            modifier = Modifier.size(20.dp)
                         )
+                    },
+                    placeholder = "Enter phone number",
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Phone,
+                        imeAction = ImeAction.Next
                     )
+                )
                 }
 
                 AnimatedVisibility(
@@ -376,231 +376,231 @@ fun AddFarmerScreen(
                     ) + fadeIn(animationSpec = tween(600, delayMillis = 200)),
                     modifier = Modifier.animateContentSize()
                 ) {
-                    AuthTextField(
-                        value = address,
-                        onValueChange = { address = it },
+                AuthTextField(
+                    value = address,
+                    onValueChange = { address = it },
                         label = "Address (Optional)",
-                        leadingIcon = {
-                            Icon(
-                                painter = painterResource(id = R.drawable.ic_location_on),
-                                contentDescription = "Address",
-                                tint = PrimaryBlue,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        },
-                        placeholder = "Enter complete address"
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(32.dp))
-
-                // Add Button
-                Button(
-                    onClick = {
+                    leadingIcon = {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_location_on),
+                            contentDescription = "Address",
+                            tint = PrimaryBlue,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    },
+                    placeholder = "Enter complete address"
+                )
+            }
+            
+            Spacer(modifier = Modifier.height(32.dp))
+            
+            // Add Button
+            Button(
+                onClick = {
                         if (name.isNotEmpty() && phone.isNotEmpty()) {
-                            if (editFarmer != null) {
-                                val updated = editFarmer.copy(
-                                    name = name,
-                                    phone = phone,
-                                    address = address,
-                                    photoUrl = photoUri?.toString() ?: editFarmer.photoUrl
-                                )
-                                farmerViewModel.updateFarmer(updated)
-
-                                // Handle photo save locally for editing
-                                if (photoUri != null) {
-                                    // Save photo locally
-                                    scope.launch {
+                        if (editFarmer != null) {
+                            val updated = editFarmer.copy(
+                                name = name,
+                                phone = phone,
+                                address = address,
+                                photoUrl = photoUri?.toString() ?: editFarmer.photoUrl
+                            )
+                            farmerViewModel.updateFarmer(updated)
+                            
+                            // Handle photo save locally for editing
+                            if (photoUri != null) {
+                                // Save photo locally
+                                scope.launch {
                                         val savedPath = farmerViewModel.saveFarmerPhoto(
                                             editFarmer.id,
                                             photoUri!!
                                         )
-                                        if (savedPath != null) {
+                                    if (savedPath != null) {
                                             Log.d(
                                                 "AddFarmerScreen",
                                                 "Farmer photo saved locally: $savedPath"
                                             )
                                         }
-                                    }
                                 }
-
-                                onFarmerAdded()
-                            } else {
-                                val farmer = Farmer(
-                                    name = name,
-                                    phone = phone,
-                                    address = address,
-                                    photoUrl = photoUri?.toString() ?: "",
+                            }
+                            
+                            onFarmerAdded()
+                        } else {
+                            val farmer = Farmer(
+                                name = name,
+                                phone = phone,
+                                address = address,
+                                photoUrl = photoUri?.toString() ?: "",
                                     addedBy = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
                                         ?: ""
-                                )
-                                farmerViewModel.addFarmer(farmer) { newFarmerId ->
-                                    // Handle photo save locally for new farmer
-                                    if (photoUri != null) {
-                                        scope.launch {
+                            )
+                            farmerViewModel.addFarmer(farmer) { newFarmerId ->
+                                // Handle photo save locally for new farmer
+                                if (photoUri != null) {
+                                    scope.launch {
                                             val savedPath = farmerViewModel.saveFarmerPhoto(
                                                 newFarmerId,
                                                 photoUri!!
                                             )
-                                            if (savedPath != null) {
+                                        if (savedPath != null) {
                                                 Log.d(
                                                     "AddFarmerScreen",
                                                     "New farmer photo saved locally: $savedPath"
                                                 )
                                             }
-                                        }
                                     }
                                 }
                             }
                         }
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue),
+                shape = RoundedCornerShape(12.dp),
+                    enabled = name.isNotEmpty() && phone.isNotEmpty() && !isViewModelLoading
+            ) {
+                if (isViewModelLoading) {
+                    CircularProgressIndicator(
+                        color = White,
+                        modifier = Modifier.size(24.dp),
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Text(
+                        text = if (editFarmer != null) "Update Farmer" else "Add Farmer",
+                        fontFamily = PoppinsFont,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp,
+                        color = White
+                    )
+                }
+            }
+            
+            // Reset Button (only for new farmers)
+            if (editFarmer == null) {
+                Spacer(modifier = Modifier.height(12.dp))
+                
+                OutlinedButton(
+                    onClick = {
+                        name = ""
+                        phone = ""
+                        address = ""
+                        photoUri = null
                     },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(56.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue),
+                        .height(48.dp),
                     shape = RoundedCornerShape(12.dp),
-                    enabled = name.isNotEmpty() && phone.isNotEmpty() && !isViewModelLoading
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = Color.Transparent,
+                        contentColor = SecondaryBlue
+                    )
                 ) {
-                    if (isViewModelLoading) {
-                        CircularProgressIndicator(
-                            color = White,
-                            modifier = Modifier.size(24.dp),
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        Text(
-                            text = if (editFarmer != null) "Update Farmer" else "Add Farmer",
-                            fontFamily = PoppinsFont,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp,
-                            color = White
-                        )
-                    }
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_refresh),
+                        contentDescription = "Reset",
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Clear Form",
+                        fontFamily = PoppinsFont,
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 14.sp
+                    )
                 }
-
-                // Reset Button (only for new farmers)
-                if (editFarmer == null) {
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    OutlinedButton(
-                        onClick = {
-                            name = ""
-                            phone = ""
-                            address = ""
-                            photoUri = null
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            containerColor = Color.Transparent,
-                            contentColor = SecondaryBlue
-                        )
-                    ) {
-                        Icon(
-                            painter = painterResource(id = R.drawable.ic_refresh),
-                            contentDescription = "Reset",
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Clear Form",
-                            fontFamily = PoppinsFont,
-                            fontWeight = FontWeight.Medium,
-                            fontSize = 14.sp
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(20.dp))
             }
-
-            // Photo Selection Dialog
-            if (showPhotoDialog) {
-                AlertDialog(
-                    onDismissRequest = { showPhotoDialog = false },
-                    title = {
+            
+            Spacer(modifier = Modifier.height(20.dp))
+        }
+        
+        // Photo Selection Dialog
+        if (showPhotoDialog) {
+            AlertDialog(
+                onDismissRequest = { showPhotoDialog = false },
+                title = {
+                    Text(
+                        text = "Select Photo",
+                        fontFamily = PoppinsFont,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp,
+                        color = PrimaryBlue
+                    )
+                },
+                text = {
+                    Text(
+                        text = "Choose how you want to add the farmer's photo",
+                        fontFamily = PoppinsFont,
+                        fontSize = 14.sp,
+                        color = SecondaryBlue
+                    )
+                },
+                confirmButton = {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        Button(
+                            onClick = {
+                                photoPickerLauncher.launch("image/*")
+                                showPhotoDialog = false
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_photo_library),
+                                contentDescription = "Gallery",
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Gallery",
+                                fontFamily = PoppinsFont,
+                                fontSize = 14.sp
+                            )
+                        }
+                        
+                        Button(
+                            onClick = {
+                                cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
+                                showPhotoDialog = false
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = SecondaryBlue),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_camera),
+                                contentDescription = "Camera",
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Camera",
+                                fontFamily = PoppinsFont,
+                                fontSize = 14.sp
+                            )
+                        }
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = { showPhotoDialog = false }
+                    ) {
                         Text(
-                            text = "Select Photo",
-                            fontFamily = PoppinsFont,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 18.sp,
-                            color = PrimaryBlue
-                        )
-                    },
-                    text = {
-                        Text(
-                            text = "Choose how you want to add the farmer's photo",
+                            text = "Cancel",
                             fontFamily = PoppinsFont,
                             fontSize = 14.sp,
                             color = SecondaryBlue
                         )
-                    },
-                    confirmButton = {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceEvenly
-                        ) {
-                            Button(
-                                onClick = {
-                                    photoPickerLauncher.launch("image/*")
-                                    showPhotoDialog = false
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Icon(
-                                    painter = painterResource(id = R.drawable.ic_photo_library),
-                                    contentDescription = "Gallery",
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "Gallery",
-                                    fontFamily = PoppinsFont,
-                                    fontSize = 14.sp
-                                )
-                            }
-
-                            Button(
-                                onClick = {
-                                    cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
-                                    showPhotoDialog = false
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = SecondaryBlue),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Icon(
-                                    painter = painterResource(id = R.drawable.ic_camera),
-                                    contentDescription = "Camera",
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "Camera",
-                                    fontFamily = PoppinsFont,
-                                    fontSize = 14.sp
-                                )
-                            }
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(
-                            onClick = { showPhotoDialog = false }
-                        ) {
-                            Text(
-                                text = "Cancel",
-                                fontFamily = PoppinsFont,
-                                fontSize = 14.sp,
-                                color = SecondaryBlue
-                            )
-                        }
-                    },
-                    containerColor = White,
-                    shape = RoundedCornerShape(16.dp)
-                )
+                    }
+                },
+                containerColor = White,
+                shape = RoundedCornerShape(16.dp)
+            )
             }
         }
     }
-}
+} 

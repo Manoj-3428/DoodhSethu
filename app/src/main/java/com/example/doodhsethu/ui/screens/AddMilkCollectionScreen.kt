@@ -104,18 +104,16 @@ fun AddMilkCollectionScreen(
     // Navigation handler
     val handleNavigation = { item: NavigationItem ->
         selectedNavigationItem = item
-        isDrawerOpen = false
+        // Keep drawer open; only the hamburger toggles it
         when (item) {
+            NavigationItem.MilkCollection -> { /* Already on this screen as Home */ }
             NavigationItem.Home -> onNavigateToDashboard()
-            NavigationItem.AddFarmer -> onNavigateToAddFarmer()
-            NavigationItem.MilkCollection -> { /* Already on this screen */ }
             NavigationItem.FatTable -> onNavigateToFatTable()
             NavigationItem.Profile -> onNavigateToProfile()
             NavigationItem.Reports -> onNavigateToReports()
             NavigationItem.UserReports -> onNavigateToUserReports()
             NavigationItem.BillingCycles -> onNavigateToBillingCycles()
-
-
+            NavigationItem.AddFarmer -> TODO()
         }
     }
 
@@ -136,15 +134,18 @@ fun AddMilkCollectionScreen(
     val isFatValid = fatValue != null && fatValue in 1.0..10.0
     val isMilkValid = milkValue != null && milkValue in 0.1..30.0
     val isFormValid = selectedFarmer != null && isFatValid && isMilkValid && farmerExists && !isLoading
-    val pricePerLiter = fatTableRows.find { fatValue != null && fatValue >= it.from && fatValue <= it.to }?.price ?: 0.0
-    val totalPrice = if (isFatValid && isMilkValid) (milkValue!! * pricePerLiter) else 0.0
+    // Get price from fat table using utility function
+    val pricePerLiter = if (fatValue != null && fatTableRows.isNotEmpty()) {
+        com.example.doodhsethu.utils.FatTableUtils.getPriceForFat(fatValue, fatTableRows)
+    } else 0.0
+    val totalPrice = if (isFatValid && isMilkValid && fatTableRows.isNotEmpty()) (milkValue!! * pricePerLiter) else 0.0
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
                     Text(
-                        text = "Milk Collection",
+                        text = "Home Milk Collection",
                         fontFamily = PoppinsFont,
                         fontWeight = FontWeight.Bold,
                         fontSize = 20.sp,
@@ -240,7 +241,8 @@ fun AddMilkCollectionScreen(
                                 focusedBorderColor = PrimaryBlue,
                                 unfocusedBorderColor = SecondaryBlue
                             ),
-                            isError = customerId.isNotBlank() && !farmerExists
+                            isError = customerId.isNotBlank() && !farmerExists,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next)
                         )
                         Spacer(modifier = Modifier.width(12.dp))
                         Surface(
@@ -410,8 +412,12 @@ fun AddMilkCollectionScreen(
                             )
                         },
                         supportingText = {
-                            if (!isMilkValid && milk.isNotBlank()) {
+                            val warn20 = milkValue != null && milkValue > 20.0 && milkValue <= 30.0
+                            val err30 = !isMilkValid && milk.isNotBlank()
+                            if (err30) {
                                 Text("Enter a value between 0.1 and 30", color = Color.Red, fontSize = 12.sp)
+                            } else if (warn20) {
+                                Text("Warning: Milk is more than 20 liters", color = Color(0xFFFFC107), fontSize = 12.sp)
                             }
                         }
                     )
@@ -452,7 +458,16 @@ fun AddMilkCollectionScreen(
                         }
                         Spacer(modifier = Modifier.width(16.dp))
                         Button(
-                            onClick = { showConfirmDialog = true },
+                            onClick = {
+                                // Show extra warning if milk > 20L
+                                val warn = milkValue != null && milkValue > 20.0
+                                if (warn) {
+                                    // Reuse confirm dialog but with warning copy
+                                    showConfirmDialog = true
+                                } else {
+                                    showConfirmDialog = true
+                                }
+                            },
                             enabled = isFormValid && !isLoading,
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(10.dp),
@@ -465,7 +480,7 @@ fun AddMilkCollectionScreen(
                                     strokeWidth = 2.dp
                                 )
                             } else {
-                                Text("Submit", fontFamily = PoppinsFont, fontWeight = FontWeight.Bold, color = White)
+                                Text("Submit", fontFamily = PoppinsFont, fontWeight = FontWeight.Bold, color = White, fontSize = 14.sp)
                             }
                         }
                     }
@@ -547,14 +562,13 @@ fun SideNavigationDrawer(
     onItemClick: (NavigationItem) -> Unit
 ) {
     val navItems = listOf(
-        NavigationItem.Home,
-        NavigationItem.AddFarmer,
-        NavigationItem.MilkCollection,
+        NavigationItem.MilkCollection, // Top: make this the home entry
+        NavigationItem.Home, // Renamed label shows as Farmers
         NavigationItem.FatTable,
-        NavigationItem.Profile,
         NavigationItem.Reports,
         NavigationItem.UserReports,
-        NavigationItem.BillingCycles
+        NavigationItem.BillingCycles,
+        NavigationItem.Profile // Bottom
     )
 
     Card(
@@ -616,7 +630,7 @@ fun NavigationItemComposable(
         ) {
             Icon(
                 painter = painterResource(id = when (item) {
-                    NavigationItem.Home -> R.drawable.ic_home
+                    NavigationItem.Home -> R.drawable.ic_groups
                     NavigationItem.AddFarmer -> R.drawable.ic_person_add
                     NavigationItem.MilkCollection -> R.drawable.ic_local_drink
                     NavigationItem.FatTable -> R.drawable.ic_assessment

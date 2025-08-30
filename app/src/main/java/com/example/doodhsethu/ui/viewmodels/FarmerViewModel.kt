@@ -105,7 +105,7 @@ class FarmerViewModel(context: Context) : ViewModel() {
                 android.util.Log.d("FarmerViewModel", "Starting background force refresh...")
                 
                 // Load local data first (instant)
-                val localFarmers = repository.getAllFarmers()
+                val localFarmers = sortFarmersById(repository.getAllFarmers())
                 _farmers.value = localFarmers
                 android.util.Log.d("FarmerViewModel", "Loaded ${localFarmers.size} farmers from local (instant)")
                 
@@ -114,7 +114,7 @@ class FarmerViewModel(context: Context) : ViewModel() {
                 lastSyncTime = System.currentTimeMillis()
                 
                 // Update with synced data
-                val syncedFarmers = repository.getAllFarmers()
+                val syncedFarmers = sortFarmersById(repository.getAllFarmers())
                 _farmers.value = syncedFarmers
                 android.util.Log.d("FarmerViewModel", "Background force refresh completed, loaded ${syncedFarmers.size} farmers")
             } catch (e: Exception) {
@@ -146,7 +146,7 @@ class FarmerViewModel(context: Context) : ViewModel() {
                 _errorMessage.value = null
                 
                 // Load local data first (instant)
-                var farmers = repository.getAllFarmers()
+                var farmers = sortFarmersById(repository.getAllFarmers())
                 
                 // Filter out recently deleted farmers
                 cleanupDeletionCache()
@@ -171,7 +171,7 @@ class FarmerViewModel(context: Context) : ViewModel() {
                             lastSyncTime = System.currentTimeMillis()
                             
                             // Update UI with synced data, filtering deleted farmers
-                            var syncedFarmers = repository.getAllFarmers()
+                            var syncedFarmers = sortFarmersById(repository.getAllFarmers())
                             
                             // Filter out recently deleted farmers
                             if (recentlyDeletedFarmers.isNotEmpty()) {
@@ -205,7 +205,7 @@ class FarmerViewModel(context: Context) : ViewModel() {
             try {
                 // NO LOADING INDICATOR - instant load for smooth UX
                 _errorMessage.value = null
-                val farmers = repository.getAllFarmers()
+                val farmers = sortFarmersById(repository.getAllFarmers())
                 _farmers.value = farmers
                 android.util.Log.d("FarmerViewModel", "Loaded ${farmers.size} farmers from local database")
             } catch (e: Exception) {
@@ -226,7 +226,7 @@ class FarmerViewModel(context: Context) : ViewModel() {
                 cleanupDeletionCache()
                 
                 repository.syncLocalWithFirestore(_isOnline.value)
-                var farmers = repository.getAllFarmers()
+                var farmers = sortFarmersById(repository.getAllFarmers())
                 
                 // Filter out recently deleted farmers from UI
                 if (recentlyDeletedFarmers.isNotEmpty()) {
@@ -242,7 +242,7 @@ class FarmerViewModel(context: Context) : ViewModel() {
             } catch (e: Exception) {
                 // If Firestore fails, just use local data silently
                 android.util.Log.w("FarmerViewModel", "Background Firestore sync failed, using local data: ${e.message}")
-                var farmers = repository.getAllFarmers()
+                var farmers = sortFarmersById(repository.getAllFarmers())
                 
                 // Filter out recently deleted farmers even from local data
                 if (recentlyDeletedFarmers.isNotEmpty()) {
@@ -280,7 +280,7 @@ class FarmerViewModel(context: Context) : ViewModel() {
                     synced = false
                 )
                 repository.insertFarmer(farmerWithId)
-                _farmers.value = repository.getAllFarmers()
+                _farmers.value = sortFarmersById(repository.getAllFarmers())
                 _successMessage.value = "Farmer added successfully!"
                 onSuccess(farmerWithId.id)
                 android.util.Log.d("FarmerViewModel", "Farmer added locally: ${farmerWithId.id}")
@@ -308,7 +308,7 @@ class FarmerViewModel(context: Context) : ViewModel() {
                 _errorMessage.value = null
                 val updatedFarmer = farmer.copy(updatedAt = Date(), synced = false)
                 repository.updateFarmer(updatedFarmer)
-                _farmers.value = repository.getAllFarmers()
+                _farmers.value = sortFarmersById(repository.getAllFarmers())
                 _successMessage.value = "Farmer updated successfully!"
                 try {
                     repository.uploadFarmerToFirestore(updatedFarmer, _isOnline.value)
@@ -331,7 +331,7 @@ class FarmerViewModel(context: Context) : ViewModel() {
                 repository.deleteFarmerById(farmerId)
                 
                 // 2. Instantly update UI with new farmers list
-                val updatedFarmers = repository.getAllFarmers()
+                val updatedFarmers = sortFarmersById(repository.getAllFarmers())
                 _farmers.value = updatedFarmers
                 android.util.Log.d("FarmerViewModel", "Farmer $farmerId deleted locally, updated farmers list size: ${updatedFarmers.size}")
                 
@@ -377,7 +377,7 @@ class FarmerViewModel(context: Context) : ViewModel() {
             try {
                 // NO LOADING INDICATOR - instant search for smooth UX
                 _errorMessage.value = null
-                val farmers = repository.getAllFarmers()
+                val farmers = sortFarmersById(repository.getAllFarmers())
                 if (query.isEmpty()) {
                     _farmers.value = farmers
                     return@launch
@@ -386,7 +386,7 @@ class FarmerViewModel(context: Context) : ViewModel() {
                     it.name.contains(query, ignoreCase = true) ||
                     it.phone.contains(query, ignoreCase = true) ||
                     it.id.contains(query, ignoreCase = true)
-                }
+                }.let { sortFarmersById(it) }
                 _farmers.value = filteredFarmers
                 android.util.Log.d("FarmerViewModel", "Search completed: found ${filteredFarmers.size} farmers for query '$query'")
             } catch (e: Exception) {
@@ -405,5 +405,12 @@ class FarmerViewModel(context: Context) : ViewModel() {
     override fun onCleared() {
         super.onCleared()
         networkUtils?.stopMonitoring()
+    }
+
+    private fun sortFarmersById(list: List<Farmer>): List<Farmer> {
+        return list.sortedWith(compareBy(
+            { it.id.toIntOrNull() ?: Int.MAX_VALUE },
+            { it.id }
+        ))
     }
 } 

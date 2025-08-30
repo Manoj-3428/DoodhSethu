@@ -42,6 +42,11 @@ fun AuthForm(
     onAuthSuccess: () -> Unit = {},
     authViewModel: AuthViewModel = viewModel()
 ) {
+    // NOTE: Register functionality is temporarily disabled
+    // To re-enable: 
+    // 1. Uncomment the Register button in the toggle section
+    // 2. Uncomment the register call in MainActivity.kt
+    // 3. Remove the isLogin = true hardcoding in MainActivity.kt
     val context = LocalContext.current
     var username by remember { mutableStateOf("") }
     var userId by remember { mutableStateOf("") }
@@ -116,6 +121,8 @@ fun AuthForm(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Center
             ) {
+                // Register button temporarily disabled - uncomment to re-enable
+                /*
                 Text(
                     text = "Register",
                     fontSize = 18.sp,
@@ -128,15 +135,15 @@ fun AuthForm(
                 )
                 
                 Spacer(modifier = Modifier.width(40.dp))
+                */
                 
                 Text(
                     text = "Login",
                     fontSize = 18.sp,
                     fontFamily = PoppinsFont,
-                    fontWeight = if (isLogin) FontWeight.Bold else FontWeight.Normal,
-                    color = if (isLogin) PrimaryBlue else PrimaryBlue.copy(alpha = 0.6f),
+                    fontWeight = FontWeight.Bold, // Always bold since register is disabled
+                    color = PrimaryBlue, // Always primary color since register is disabled
                     modifier = Modifier
-                        .clickable { if (!isLogin) onToggleMode() }
                         .padding(horizontal = 30.dp, vertical = 16.dp)
                 )
             }

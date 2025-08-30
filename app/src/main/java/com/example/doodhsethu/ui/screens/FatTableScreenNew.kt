@@ -28,6 +28,7 @@ import com.example.doodhsethu.ui.viewmodels.FatTableViewModelFactory
 import com.example.doodhsethu.data.models.FatRangeRow
 import com.example.doodhsethu.utils.NetworkUtils
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -51,17 +52,26 @@ fun FatTableScreenNew(
         }
     }
     
+    // Track previous network state
+    var previousNetworkState by remember { mutableStateOf(isOnline) }
+    
     // Initialize data and handle network changes
     LaunchedEffect(isOnline) {
         try {
-            if (!isOnline) {
-                // If offline, just initialize with local data
-                viewModel.initializeData(false)
-            } else {
-                // If online, initialize and sync
-                android.util.Log.d("FatTableScreen", "Network available, initializing and syncing...")
-                viewModel.initializeData(true)
+            // Always initialize data when network state changes
+            viewModel.initializeData(isOnline)
+            
+            // If network changed from offline to online, handle the transition
+            if (previousNetworkState == false && isOnline == true) {
+                viewModel.handleOfflineToOnlineTransition()
             }
+            
+            // If network changed from online to offline, stop real-time sync
+            if (previousNetworkState == true && isOnline == false) {
+                // Real-time sync will be stopped in initializeData
+            }
+            
+            previousNetworkState = isOnline
         } catch (e: Exception) {
             android.util.Log.e("FatTableScreen", "Initialization failed: ${e.message}")
         }
@@ -71,6 +81,7 @@ fun FatTableScreenNew(
     val rows by viewModel.fatTableRows.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
+    val successMessage by viewModel.successMessage.collectAsState()
     
     // Local state
     var showAddDialog by remember { mutableStateOf(false) }
@@ -81,8 +92,8 @@ fun FatTableScreenNew(
     
     val snackbarHostState = remember { SnackbarHostState() }
     
-    // Handle errors
-    LaunchedEffect(errorMessage) {
+    // Handle messages
+    LaunchedEffect(errorMessage, successMessage) {
         errorMessage?.let { message ->
             try {
                 scope.launch { snackbarHostState.showSnackbar(message) }
@@ -91,9 +102,61 @@ fun FatTableScreenNew(
                 // Handle error display
             }
         }
+        
+        successMessage?.let { message ->
+            try {
+                scope.launch { snackbarHostState.showSnackbar(message) }
+                viewModel.clearMessages()
+            } catch (e: Exception) {
+                // Handle success display
+            }
+        }
     }
     
     Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        text = "Fat Table",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                },
+                navigationIcon = {
+                    if (onNavigateBack != null) {
+                        IconButton(onClick = { onNavigateBack() }) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_arrow_back),
+                                contentDescription = "Back"
+                            )
+                        }
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = PrimaryBlue,
+                    titleContentColor = Color.White,
+                    navigationIconContentColor = Color.White
+                )
+            )
+        },
+        floatingActionButton = {
+            FloatingActionButton(
+                onClick = { showAddDialog = true },
+                containerColor = PrimaryBlue,
+                contentColor = Color.White,
+                elevation = FloatingActionButtonDefaults.elevation(
+                    defaultElevation = 8.dp,
+                    pressedElevation = 12.dp
+                )
+            ) {
+                Icon(
+                    Icons.Default.Add,
+                    contentDescription = "Add Fat Range",
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        },
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { paddingValues ->
         Column(
@@ -103,25 +166,6 @@ fun FatTableScreenNew(
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp)
         ) {
-            // Top bar
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (onNavigateBack != null) {
-                    IconButton(onClick = { onNavigateBack() }) {
-                        Icon(
-                            painter = painterResource(id = R.drawable.ic_arrow_back),
-                            contentDescription = "Back"
-                        )
-                    }
-                }
-                
-                IconButton(onClick = { showAddDialog = true }) {
-                    Icon(Icons.Default.Add, contentDescription = "Add")
-                }
-            }
             
             Spacer(modifier = Modifier.height(16.dp))
             
@@ -397,27 +441,26 @@ fun FatRowDialogNew(
             if (fromValue >= toValue) {
                 validationError = "From value must be less than To value"
             } else {
-                // Check for overlap with existing ranges
+                // Round the float values to 3 decimal places for validation
+                val roundedFrom = (fromValue * 1000).roundToInt() / 1000f
+                val roundedTo = (toValue * 1000).roundToInt() / 1000f
+                
+                // Check for overlap with existing ranges using FatTableUtils
                 val testRow = FatRangeRow(
                     id = initialRow?.id ?: -1,
-                    from = fromValue,
-                    to = toValue,
+                    from = roundedFrom,
+                    to = roundedTo,
                     price = 0.0,
                     isSynced = false
                 )
                 
-                var hasOverlap = false
-                for (existingRow in currentRows) {
-                    if (initialRow?.id != existingRow.id) { // Skip current row when editing
-                        val overlaps = !(testRow.to <= existingRow.from || testRow.from >= existingRow.to)
-                        if (overlaps) {
-                            hasOverlap = true
-                            break
-                        }
-                    }
-                }
+                val isValid = com.example.doodhsethu.utils.FatTableUtils.validateFatRange(
+                    testRow, 
+                    currentRows, 
+                    if (initialRow != null) initialRow.id else null
+                )
                 
-                if (hasOverlap) {
+                if (!isValid) {
                     validationError = "This range overlaps with an existing range"
                 } else {
                     validationError = null
@@ -483,14 +526,18 @@ fun FatRowDialogNew(
                     val priceValue = price.toDoubleOrNull()
                     
                     if (fromValue != null && toValue != null && priceValue != null && fromValue < toValue && validationError == null) {
+                        // Round the float values to 3 decimal places to avoid precision issues
+                        val roundedFrom = (fromValue * 1000).roundToInt() / 1000f
+                        val roundedTo = (toValue * 1000).roundToInt() / 1000f
+                        
                         // Preserve the original ID when editing
                         val updatedRow = if (initialRow != null) {
                             // Editing existing row - preserve ID
                             android.util.Log.d("FatTableScreen", "Editing row with ID: ${initialRow.id}")
                             FatRangeRow(
                                 id = initialRow.id,
-                                from = fromValue,
-                                to = toValue,
+                                from = roundedFrom,
+                                to = roundedTo,
                                 price = priceValue,
                                 isSynced = false
                             )
@@ -498,8 +545,8 @@ fun FatRowDialogNew(
                             // Adding new row
                             android.util.Log.d("FatTableScreen", "Adding new row")
                             FatRangeRow(
-                                from = fromValue,
-                                to = toValue,
+                                from = roundedFrom,
+                                to = roundedTo,
                                 price = priceValue,
                                 isSynced = false
                             )

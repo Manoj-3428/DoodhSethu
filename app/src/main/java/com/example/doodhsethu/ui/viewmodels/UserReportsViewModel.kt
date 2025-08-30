@@ -47,7 +47,22 @@ class UserReportsViewModel(private val context: android.content.Context) : ViewM
         viewModelScope.launch {
             networkUtils.isOnline.collect { isOnline ->
                 _isOnline.value = isOnline
+                if (isOnline) {
+                    // Start real-time sync when online
+                    startRealTimeSync()
+                } else {
+                    // Stop real-time sync when offline
+                    stopRealTimeSync()
+                }
             }
+        }
+        
+        // Set up callback for data changes
+        repository.setOnDataChangedCallback {
+            refreshData()
+        }
+        billingCycleRepository.setOnDataChangedCallback {
+            refreshData()
         }
     }
     
@@ -161,8 +176,14 @@ class UserReportsViewModel(private val context: android.content.Context) : ViewM
             calendar.add(Calendar.DAY_OF_MONTH, 1)
         }
         
-        // Sort by date (newest first)
-        return dailyData.sortedByDescending { it.date }
+        // Sort by actual date to avoid string-based ordering issues (oldest first)
+        return dailyData.sortedBy {
+            try {
+                dateFormat.parse(it.date)
+            } catch (_: Exception) {
+                null
+            }
+        }
     }
     
     /**
@@ -192,6 +213,61 @@ class UserReportsViewModel(private val context: android.content.Context) : ViewM
         _errorMessage.value = null
         _successMessage.value = null
         _isLoading.value = false
+    }
+    
+    /**
+     * Start real-time sync
+     */
+    private fun startRealTimeSync() {
+        viewModelScope.launch {
+            try {
+                repository.startRealTimeSync()
+                billingCycleRepository.startRealTimeSync()
+                android.util.Log.d("UserReportsViewModel", "Real-time sync started")
+            } catch (e: Exception) {
+                android.util.Log.e("UserReportsViewModel", "Error starting real-time sync: ${e.message}")
+            }
+        }
+    }
+    
+    /**
+     * Stop real-time sync
+     */
+    private fun stopRealTimeSync() {
+        viewModelScope.launch {
+            try {
+                repository.stopRealTimeSync()
+                billingCycleRepository.stopRealTimeSync()
+                android.util.Log.d("UserReportsViewModel", "Real-time sync stopped")
+            } catch (e: Exception) {
+                android.util.Log.e("UserReportsViewModel", "Error stopping real-time sync: ${e.message}")
+            }
+        }
+    }
+    
+    /**
+     * Refresh data when real-time updates are received
+     */
+    private fun refreshData() {
+        viewModelScope.launch {
+            try {
+                // Get current farmer ID if any
+                val currentFarmerId = _farmerName.value.let { name ->
+                    if (name.isNotEmpty()) {
+                        // Try to find farmer by name
+                        val allFarmers = farmerRepository.getAllFarmers()
+                        allFarmers.find { it.name == name }?.id
+                    } else null
+                }
+                
+                if (currentFarmerId != null) {
+                    // Reload data for current farmer
+                    loadUserReports(currentFarmerId)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("UserReportsViewModel", "Error refreshing data: ${e.message}")
+            }
+        }
     }
 }
 

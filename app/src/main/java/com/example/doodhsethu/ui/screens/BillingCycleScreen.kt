@@ -1,5 +1,6 @@
 package com.example.doodhsethu.ui.screens
 
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -26,6 +27,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.doodhsethu.ui.viewmodels.BillingCycleViewModel
 import com.example.doodhsethu.ui.viewmodels.BillingCycleViewModelFactory
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.graphics.Color
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -51,6 +55,26 @@ fun BillingCycleScreen(
     // Debug logging
     LaunchedEffect(billingCycles, isLoading) {
         android.util.Log.d("BillingCycleScreen", "UI State - isLoading: $isLoading, billingCycles.size: ${billingCycles.size}")
+    }
+    
+    // Handle real-time updates
+    LaunchedEffect(isOnline) {
+        if (isOnline) {
+            android.util.Log.d("BillingCycleScreen", "Network is online, ensuring real-time sync is active")
+            // Force refresh when coming online to ensure we have the latest data
+            viewModel.refreshBillingCycles()
+        }
+    }
+    
+    // Periodic refresh to ensure UI stays up-to-date
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(30000) // Refresh every 30 seconds
+            if (isOnline) {
+                android.util.Log.d("BillingCycleScreen", "Periodic refresh triggered")
+                viewModel.refreshBillingCycles()
+            }
+        }
     }
     
     var showCreateDialog by remember { mutableStateOf(false) }
@@ -177,6 +201,36 @@ fun BillingCycleScreen(
                 isOnline = isOnline,
                 modifier = Modifier.padding(bottom = 16.dp)
             )
+            
+            // Real-time sync indicator
+            if (isOnline) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val syncColor by animateColorAsState(
+                        targetValue = if (isOnline) Color.Green else Color.Gray,
+                        label = "sync_indicator"
+                    )
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .background(
+                                color = syncColor,
+                                shape = CircleShape
+                            )
+                    )
+                    Text(
+                        text = "Real-time sync active",
+                        fontFamily = PoppinsFont,
+                        fontSize = 12.sp,
+                        color = Color.Gray
+                    )
+                }
+            }
             // Show loading indicator
             if (isLoading) {
                 Box(

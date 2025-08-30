@@ -53,6 +53,9 @@ interface FarmerBillingDetailDao {
     @Query("SELECT * FROM farmer_billing_details WHERE farmerId = :farmerId AND billingCycleId = :billingCycleId")
     suspend fun getFarmerBillingDetail(farmerId: String, billingCycleId: String): FarmerBillingDetail?
 
+    @Query("SELECT * FROM farmer_billing_details WHERE id = :id")
+    suspend fun getFarmerBillingDetailById(id: String): FarmerBillingDetail?
+
     @Query("SELECT * FROM farmer_billing_details WHERE isSynced = 0")
     suspend fun getUnsyncedFarmerBillingDetails(): List<FarmerBillingDetail>
 

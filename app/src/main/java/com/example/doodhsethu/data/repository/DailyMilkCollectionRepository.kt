@@ -25,6 +25,13 @@ class DailyMilkCollectionRepository(private val context: Context) {
     private val authViewModel = AuthViewModel()
     private val dateFormat = SimpleDateFormat("dd-MM-yyyy", Locale.getDefault())
     
+    // Real-time sync state
+    private var isRealTimeSyncActive = false
+    private var realTimeSyncJob: kotlinx.coroutines.Job? = null
+    
+    // Callback for UI updates
+    private var onDataChangedCallback: (() -> Unit)? = null
+    
     // Get current user ID for Firestore operations
     private fun getCurrentUserId(): String? {
         return authViewModel.getStoredUser(context)?.userId
@@ -44,36 +51,46 @@ class DailyMilkCollectionRepository(private val context: Context) {
         try {
             val today = dateFormat.format(Date())
             
-            // Calculate totals
-            val totalMilk = amMilk + pmMilk
-            val totalFat = if (totalMilk > 0) ((amMilk * amFat + pmMilk * pmFat) / totalMilk) else 0.0
-            val totalAmount = amPrice + pmPrice
-
-            android.util.Log.d("DailyMilkCollectionRepository", "Creating collection for farmer $farmerId: AM(₹$amPrice) + PM(₹$pmPrice) = Total(₹$totalAmount)")
-
             // Check if collection already exists for today
             val existingCollection = dailyMilkCollectionDao.getDailyMilkCollectionByFarmerAndDate(farmerId, today)
             
             val dailyCollection = if (existingCollection != null) {
-                // Update existing collection
+                // Update existing collection - preserve existing data for sessions not being updated
                 val updatedCollection = existingCollection.copy(
-                    amMilk = amMilk,
-                    amFat = amFat,
-                    amPrice = amPrice,
-                    pmMilk = pmMilk,
-                    pmFat = pmFat,
-                    pmPrice = pmPrice,
-                    totalMilk = totalMilk,
-                    totalFat = totalFat,
-                    totalAmount = totalAmount,
+                    amMilk = if (amMilk > 0) amMilk else existingCollection.amMilk,
+                    amFat = if (amFat > 0) amFat else existingCollection.amFat,
+                    amPrice = if (amPrice > 0) amPrice else existingCollection.amPrice,
+                    pmMilk = if (pmMilk > 0) pmMilk else existingCollection.pmMilk,
+                    pmFat = if (pmFat > 0) pmFat else existingCollection.pmFat,
+                    pmPrice = if (pmPrice > 0) pmPrice else existingCollection.pmPrice,
                     updatedAt = Date(),
                     isSynced = false
                 )
+                
+                // Recalculate totals based on updated data
+                val finalTotalMilk = updatedCollection.amMilk + updatedCollection.pmMilk
+                val finalTotalFat = if (finalTotalMilk > 0) {
+                    ((updatedCollection.amMilk * updatedCollection.amFat + updatedCollection.pmMilk * updatedCollection.pmFat) / finalTotalMilk)
+                } else 0.0
+                val finalTotalAmount = updatedCollection.amPrice + updatedCollection.pmPrice
+                
+                val finalCollection = updatedCollection.copy(
+                    totalMilk = finalTotalMilk,
+                    totalFat = finalTotalFat,
+                    totalAmount = finalTotalAmount
+                )
+                
+                android.util.Log.d("DailyMilkCollectionRepository", "Updating existing collection for farmer $farmerId: AM(₹${finalCollection.amPrice}) + PM(₹${finalCollection.pmPrice}) = Total(₹${finalCollection.totalAmount})")
+                
                 // Update the existing collection
-                dailyMilkCollectionDao.updateDailyMilkCollection(updatedCollection)
-                updatedCollection
+                dailyMilkCollectionDao.updateDailyMilkCollection(finalCollection)
+                finalCollection
             } else {
                 // Create new collection
+                val totalMilk = amMilk + pmMilk
+                val totalFat = if (totalMilk > 0) ((amMilk * amFat + pmMilk * pmFat) / totalMilk) else 0.0
+                val totalAmount = amPrice + pmPrice
+                
                 val newCollection = DailyMilkCollection(
                     date = today,
                     farmerId = farmerId,
@@ -89,10 +106,14 @@ class DailyMilkCollectionRepository(private val context: Context) {
                     totalAmount = totalAmount,
                     isSynced = false
                 )
+                
+                android.util.Log.d("DailyMilkCollectionRepository", "Creating new collection for farmer $farmerId: AM(₹$amPrice) + PM(₹$pmPrice) = Total(₹$totalAmount)")
+                
                 // Insert the new collection
                 dailyMilkCollectionDao.insertDailyMilkCollection(newCollection)
                 newCollection
             }
+            
             android.util.Log.d("DailyMilkCollectionRepository", "Saved daily collection locally: ${dailyCollection.farmerName} - ${dailyCollection.date} - Total Amount: ₹${dailyCollection.totalAmount}")
 
             // Return immediately - don't block UI
@@ -595,7 +616,12 @@ class DailyMilkCollectionRepository(private val context: Context) {
                             amPrice = totalAmPrice,
                             pmPrice = totalPmPrice,
                             totalQuantity = totalAmQuantity + totalPmQuantity,
-                            totalPrice = totalAmPrice + totalPmPrice
+                            totalPrice = {
+                                // Use rounded values for AM and PM prices to avoid 1 Paisa difference
+                                val roundedAmPrice = String.format(Locale.getDefault(), "%.2f", totalAmPrice).toDouble()
+                                val roundedPmPrice = String.format(Locale.getDefault(), "%.2f", totalPmPrice).toDouble()
+                                roundedAmPrice + roundedPmPrice
+                            }()
                         )
                     )
                 }
@@ -653,6 +679,90 @@ class DailyMilkCollectionRepository(private val context: Context) {
         }
     }
 
+    /**
+     * Get detailed farmer milk collection data for a specific date (synchronous version for Excel export)
+     */
+    suspend fun getFarmerMilkDetailsForDateSync(date: String): List<FarmerMilkDetail> {
+        return try {
+            android.util.Log.d("DailyMilkCollectionRepository", "Getting farmer milk details for date: $date")
+            
+            val collections = dailyMilkCollectionDao.getDailyMilkCollectionsByDate(date)
+            android.util.Log.d("DailyMilkCollectionRepository", "Found ${collections.size} collections for date: $date")
+            
+            // Filter out collections from deleted farmers
+            val farmerRepository = FarmerRepository(context)
+            val existingFarmers = farmerRepository.getAllFarmers()
+            val existingFarmerIds = existingFarmers.map { it.id }.toSet()
+            
+            val validCollections = collections.filter { collection ->
+                existingFarmerIds.contains(collection.farmerId)
+            }
+            
+            android.util.Log.d("DailyMilkCollectionRepository", "After filtering deleted farmers: ${validCollections.size} valid collections")
+            
+            // Group collections by farmer to avoid duplicates
+            val groupedCollections = validCollections.groupBy { it.farmerId }
+            
+            val farmerDetails = groupedCollections.map { (farmerId, collections) ->
+                // Get the first collection (they should all have the same farmer info)
+                val firstCollection = collections.first()
+                
+                // Sum up all AM and PM data for this farmer on this date
+                val totalAmMilk = collections.sumOf { it.amMilk }
+                val totalPmMilk = collections.sumOf { it.pmMilk }
+                
+                // Calculate weighted average fat based on milk quantity
+                val totalAmFat = if (totalAmMilk > 0) {
+                    val weightedFatSum = collections.sumOf { it.amMilk * it.amFat }
+                    weightedFatSum / totalAmMilk
+                } else 0.0
+                
+                val totalPmFat = if (totalPmMilk > 0) {
+                    val weightedFatSum = collections.sumOf { it.pmMilk * it.pmFat }
+                    weightedFatSum / totalPmMilk
+                } else 0.0
+                
+                val totalAmPrice = collections.sumOf { it.amPrice }
+                val totalPmPrice = collections.sumOf { it.pmPrice }
+                
+                FarmerMilkDetail(
+                    farmerId = farmerId,
+                    farmerName = firstCollection.farmerName,
+                    amMilk = totalAmMilk,
+                    amFat = totalAmFat,
+                    amPrice = totalAmPrice,
+                    pmMilk = totalPmMilk,
+                    pmFat = totalPmFat,
+                    pmPrice = totalPmPrice,
+                    totalMilk = totalAmMilk + totalPmMilk,
+                    totalPrice = {
+                        // Use rounded values for AM and PM prices to avoid 1 Paisa difference
+                        val roundedAmPrice = String.format(Locale.getDefault(), "%.2f", totalAmPrice).toDouble()
+                        val roundedPmPrice = String.format(Locale.getDefault(), "%.2f", totalPmPrice).toDouble()
+                        roundedAmPrice + roundedPmPrice
+                    }()
+                )
+            }
+            
+            android.util.Log.d("DailyMilkCollectionRepository", "Generated ${farmerDetails.size} farmer details")
+            
+            // Sort farmers by their ID (numeric sorting)
+            val sortedFarmerDetails = farmerDetails.sortedBy { farmer ->
+                try {
+                    farmer.farmerId.toInt()
+                } catch (_: NumberFormatException) {
+                    // If farmer ID is not a number, use a large number to sort them last
+                    Int.MAX_VALUE
+                }
+            }
+            
+            sortedFarmerDetails
+        } catch (e: Exception) {
+            android.util.Log.e("DailyMilkCollectionRepository", "Error getting farmer milk details: ${e.message}")
+            emptyList()
+        }
+    }
+    
     /**
      * Get detailed farmer milk collection data for a specific date
      */
@@ -727,12 +837,28 @@ class DailyMilkCollectionRepository(private val context: Context) {
                         pmFat = totalPmFat,
                         pmPrice = totalPmPrice,
                         totalMilk = totalAmMilk + totalPmMilk,
-                        totalPrice = totalAmPrice + totalPmPrice
+                        totalPrice = {
+                            // Use rounded values for AM and PM prices to avoid 1 Paisa difference
+                            val roundedAmPrice = String.format(Locale.getDefault(), "%.2f", totalAmPrice).toDouble()
+                            val roundedPmPrice = String.format(Locale.getDefault(), "%.2f", totalPmPrice).toDouble()
+                            roundedAmPrice + roundedPmPrice
+                        }()
                     )
                 }
                 
                 android.util.Log.d("DailyMilkCollectionRepository", "Generated ${farmerDetails.size} farmer details")
-                farmerDetails
+                
+                // Sort farmers by their ID (numeric sorting)
+                val sortedFarmerDetails = farmerDetails.sortedBy { farmer ->
+                    try {
+                        farmer.farmerId.toInt()
+                    } catch (_: NumberFormatException) {
+                        // If farmer ID is not a number, use a large number to sort them last
+                        Int.MAX_VALUE
+                    }
+                }
+                
+                sortedFarmerDetails
             } catch (e: Exception) {
                 android.util.Log.e("DailyMilkCollectionRepository", "Error getting farmer milk details: ${e.message}")
                 emptyList()
@@ -1009,6 +1135,165 @@ class DailyMilkCollectionRepository(private val context: Context) {
         } catch (e: Exception) {
             android.util.Log.e("DailyMilkCollectionRepository", "Error cleaning up duplicate entries: ${e.message}")
         }
+    }
+    
+    /**
+     * Set callback for data changes
+     */
+    fun setOnDataChangedCallback(callback: () -> Unit) {
+        onDataChangedCallback = callback
+    }
+    
+    /**
+     * Start real-time sync with Firestore
+     */
+    fun startRealTimeSync() {
+        if (isRealTimeSyncActive) {
+            android.util.Log.d("DailyMilkCollectionRepository", "Real-time sync already active")
+            return
+        }
+        
+        isRealTimeSyncActive = true
+        realTimeSyncJob = CoroutineScope(Dispatchers.IO).launch {
+            try {
+                android.util.Log.d("DailyMilkCollectionRepository", "Starting real-time sync with Firestore")
+                
+                val userId = getCurrentUserId()
+                if (userId == null) {
+                    android.util.Log.e("DailyMilkCollectionRepository", "Cannot start real-time sync: User not authenticated")
+                    return@launch
+                }
+                
+                // Set up real-time listener for daily milk collection data
+                firestore.collection("users")
+                    .document(userId)
+                    .collection("milk-collection")
+                    .addSnapshotListener { snapshot, error ->
+                        if (error != null) {
+                            android.util.Log.e("DailyMilkCollectionRepository", "Real-time sync error: ${error.message}")
+                            return@addSnapshotListener
+                        }
+                        
+                        if (snapshot != null) {
+                            CoroutineScope(Dispatchers.IO).launch {
+                                try {
+                                    // Process real-time updates
+                                    processRealTimeUpdates(snapshot)
+                                } catch (e: Exception) {
+                                    android.util.Log.e("DailyMilkCollectionRepository", "Error processing real-time updates: ${e.message}")
+                                }
+                            }
+                        }
+                    }
+                
+                android.util.Log.d("DailyMilkCollectionRepository", "Real-time sync listener established")
+            } catch (e: Exception) {
+                android.util.Log.e("DailyMilkCollectionRepository", "Error starting real-time sync: ${e.message}")
+                isRealTimeSyncActive = false
+            }
+        }
+    }
+    
+    /**
+     * Stop real-time sync
+     */
+    fun stopRealTimeSync() {
+        if (!isRealTimeSyncActive) {
+            return
+        }
+        
+        isRealTimeSyncActive = false
+        realTimeSyncJob?.cancel()
+        realTimeSyncJob = null
+        android.util.Log.d("DailyMilkCollectionRepository", "Real-time sync stopped")
+    }
+    
+    /**
+     * Process real-time updates from Firestore
+     */
+    private suspend fun processRealTimeUpdates(snapshot: com.google.firebase.firestore.QuerySnapshot) = withContext(Dispatchers.IO) {
+        try {
+            android.util.Log.d("DailyMilkCollectionRepository", "Processing real-time updates")
+            
+            val userId = getCurrentUserId()
+            if (userId == null) {
+                android.util.Log.e("DailyMilkCollectionRepository", "Cannot process updates: User not authenticated")
+                return@withContext
+            }
+            
+            // Process each date document
+            for (dateDoc in snapshot.documents) {
+                val date = dateDoc.id
+                android.util.Log.d("DailyMilkCollectionRepository", "Processing date: $date")
+                
+                // Get farmers collection for this date
+                val farmersSnapshot = dateDoc.reference.collection("farmers").get().await()
+                
+                for (farmerDoc in farmersSnapshot.documents) {
+                    val farmerId = farmerDoc.id
+                    val data = farmerDoc.data
+                    
+                    if (data != null) {
+                        try {
+                            // Convert Firestore data to DailyMilkCollection
+                            val dailyCollection = convertFirestoreDataToDailyMilkCollection(data, farmerId, date)
+                            
+                            // Check if collection already exists
+                            val existingCollection = dailyMilkCollectionDao.getDailyMilkCollectionByFarmerAndDate(farmerId, date)
+                            if (existingCollection == null) {
+                                // Insert new collection
+                                dailyMilkCollectionDao.insertDailyMilkCollection(dailyCollection.copy(isSynced = true))
+                                android.util.Log.d("DailyMilkCollectionRepository", "Added new daily collection from real-time sync: ${dailyCollection.farmerName} - $date")
+                            } else {
+                                // Update existing collection
+                                dailyMilkCollectionDao.updateDailyMilkCollection(dailyCollection.copy(isSynced = true))
+                                android.util.Log.d("DailyMilkCollectionRepository", "Updated daily collection from real-time sync: ${dailyCollection.farmerName} - $date")
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.e("DailyMilkCollectionRepository", "Error updating local storage: ${e.message}")
+                        }
+                    }
+                }
+            }
+            
+            // Notify UI of data changes
+            onDataChangedCallback?.invoke()
+            
+        } catch (e: Exception) {
+            android.util.Log.e("DailyMilkCollectionRepository", "Error processing real-time updates: ${e.message}")
+        }
+    }
+    
+    /**
+     * Convert Firestore data to DailyMilkCollection
+     */
+    private fun convertFirestoreDataToDailyMilkCollection(data: Map<String, Any>, farmerId: String, date: String): DailyMilkCollection {
+        val farmerName = data["farmerName"] as? String ?: ""
+        val amMilk = data["am_milk"] as? Double ?: 0.0
+        val amFat = data["am_fat"] as? Double ?: 0.0
+        val amPrice = data["am_price"] as? Double ?: 0.0
+        val pmMilk = data["pm_milk"] as? Double ?: 0.0
+        val pmFat = data["pm_fat"] as? Double ?: 0.0
+        val pmPrice = data["pm_price"] as? Double ?: 0.0
+        val totalMilk = data["total_milk"] as? Double ?: 0.0
+        val totalFat = data["total_fat"] as? Double ?: 0.0
+        val totalAmount = data["total_amount"] as? Double ?: 0.0
+        
+        return DailyMilkCollection(
+            date = date,
+            farmerId = farmerId,
+            farmerName = farmerName,
+            amMilk = amMilk,
+            amFat = amFat,
+            amPrice = amPrice,
+            pmMilk = pmMilk,
+            pmFat = pmFat,
+            pmPrice = pmPrice,
+            totalMilk = totalMilk,
+            totalFat = totalFat,
+            totalAmount = totalAmount,
+            isSynced = true
+        )
     }
 }
          

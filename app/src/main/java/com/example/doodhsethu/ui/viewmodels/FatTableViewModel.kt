@@ -5,236 +5,376 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.doodhsethu.data.models.FatRangeRow
 import com.example.doodhsethu.data.repository.FatTableRepository
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import com.example.doodhsethu.utils.FatTableUtils
+import kotlin.math.roundToInt
 
 class FatTableViewModel(context: Context) : ViewModel() {
     private val repository = FatTableRepository(context)
-
-    private val _fatTableRows = MutableStateFlow<List<FatRangeRow>>(emptyList())
-    val fatTableRows: StateFlow<List<FatRangeRow>> = _fatTableRows.asStateFlow()
-
+    
+    init {
+        // Set up callback for real-time updates
+        repository.setOnDataChangedCallback {
+            refreshUI()
+        }
+    }
+    
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
-
+    
+    private val _fatTableRows = MutableStateFlow<List<FatRangeRow>>(emptyList())
+    val fatTableRows: StateFlow<List<FatRangeRow>> = _fatTableRows.asStateFlow()
+    
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
     
+    private val _successMessage = MutableStateFlow<String?>(null)
+    val successMessage: StateFlow<String?> = _successMessage.asStateFlow()
+    
     private var isInitialized = false
 
+    /**
+     * Initialize fat table data
+     * Priority: Local storage first, then Firestore if online
+     */
     fun initializeData(isOnline: Boolean) {
-        // Prevent multiple initializations
         if (isInitialized && _fatTableRows.value.isNotEmpty()) {
-            android.util.Log.d("FatTableViewModel", "Already initialized, skipping...")
             return
         }
         
-        // If already loading, don't start another load
         if (_isLoading.value) {
-            android.util.Log.d("FatTableViewModel", "Already loading, skipping...")
             return
         }
         
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                android.util.Log.d("FatTableViewModel", "Initializing data, isOnline: $isOnline")
-                
-                // First, always load from local database
+                // Always load from local storage first
                 var rows = repository.getAllFatRows()
-                android.util.Log.d("FatTableViewModel", "Loaded ${rows.size} rows from local database")
                 
-                // If no local data exists, add sample data
-                if (rows.isEmpty()) {
-                    android.util.Log.d("FatTableViewModel", "No local data found, adding sample data")
-                    val sampleData = listOf(
-                        FatRangeRow(from = 6.3f, to = 6.5f, price = 49.41),
-                        FatRangeRow(from = 6.6f, to = 6.8f, price = 51.84),
-                        FatRangeRow(from = 6.9f, to = 7.1f, price = 54.27),
-                        FatRangeRow(from = 7.2f, to = 7.4f, price = 56.7),
-                        FatRangeRow(from = 7.5f, to = 7.7f, price = 59.13),
-                        FatRangeRow(from = 7.8f, to = 8.0f, price = 61.56),
-                        FatRangeRow(from = 8.1f, to = 8.3f, price = 63.99),
-                        FatRangeRow(from = 8.4f, to = 8.6f, price = 66.42),
-                        FatRangeRow(from = 8.7f, to = 8.9f, price = 68.85),
-                        FatRangeRow(from = 9.0f, to = 9.2f, price = 71.28),
-                        FatRangeRow(from = 9.3f, to = 9.5f, price = 73.71),
-                        FatRangeRow(from = 9.6f, to = 9.8f, price = 76.14),
-                        FatRangeRow(from = 9.9f, to = 10.1f, price = 78.57),
-                        FatRangeRow(from = 10.2f, to = 10.4f, price = 81.0)
-                    )
-                    repository.insertFatRows(sampleData)
-                    rows = repository.getAllFatRows()
-                    android.util.Log.d("FatTableViewModel", "After adding sample data: ${rows.size} rows")
-                }
-                
-                // If online, try to sync with Firestore (but don't block if it fails)
+                // If online, handle offline-to-online transition properly
                 if (isOnline) {
                     try {
-                        android.util.Log.d("FatTableViewModel", "Attempting to sync with Firestore")
-                        repository.loadFromFirestore(true)
-                        // Only reload if sync was successful
+                        // First, handle any offline entries that need to be synced
+                        repository.handleOfflineToOnlineSync()
+                        
+                        // Then do a complete sync
+                        repository.syncWithFirestore()
+                        
+                        // Start real-time sync for immediate updates
+                        repository.startRealTimeSync()
+                        
                         rows = repository.getAllFatRows()
-                        android.util.Log.d("FatTableViewModel", "After Firestore sync: ${rows.size} rows")
                     } catch (e: Exception) {
-                        // If sync fails, continue with local data
-                        android.util.Log.e("FatTableViewModel", "Firestore sync failed: ${e.message}")
+                        // Continue with local data if Firestore sync fails
                         _errorMessage.value = "Using local data. Sync failed: ${e.message}"
                     }
+                } else {
+                    // Stop real-time sync if offline
+                    repository.stopRealTimeSync()
                 }
                 
-                android.util.Log.d("FatTableViewModel", "Final rows count: ${rows.size}")
-                _fatTableRows.value = rows
+                _fatTableRows.value = FatTableUtils.sortFatRanges(rows)
                 isInitialized = true
             } catch (e: Exception) {
-                android.util.Log.e("FatTableViewModel", "Error initializing data: ${e.message}")
-                _errorMessage.value = e.message
+                _errorMessage.value = "Failed to load fat table: ${e.message}"
             } finally {
                 _isLoading.value = false
             }
         }
     }
 
+    /**
+     * Add new fat range entry
+     * 1. Validate no overlap with existing ranges
+     * 2. Save to local storage immediately
+     * 3. Sync to Firestore in background if online
+     */
     fun addFatRow(row: FatRangeRow, isOnline: Boolean) {
         viewModelScope.launch {
             try {
-                _isLoading.value = true
+                // Round the float values to 3 decimal places to avoid precision issues
+                val roundedRow = row.copy(
+                    from = (row.from * 1000).roundToInt() / 1000f,
+                    to = (row.to * 1000).roundToInt() / 1000f
+                )
                 
-                // Validate the range doesn't overlap
-                if (!validateFatRange(row)) {
+                // Use repository method that handles validation and sync
+                val success = repository.addFatRowWithSync(roundedRow, isOnline)
+                
+                if (success) {
+                    // Update UI immediately without showing loader
+                    _fatTableRows.value = FatTableUtils.sortFatRanges(repository.getAllFatRows())
+                    _successMessage.value = "Fat range added successfully!"
+                } else {
                     _errorMessage.value = "This fat range overlaps with an existing range. Please choose a different range."
-                    return@launch
                 }
-                
-                // Save locally with isSynced = false
-                repository.insertFatRow(row.copy(isSynced = false))
-                // Always sync when online, but don't block if offline
-                if (isOnline) {
-                    try {
-                        repository.uploadToFirestore(true)
-                    } catch (e: Exception) {
-                        // If sync fails, data is still saved locally
-                        _errorMessage.value = "Data saved locally. Will sync when online."
-                    }
-                }
-                _fatTableRows.value = repository.getAllFatRows()
             } catch (e: Exception) {
-                _errorMessage.value = e.message
-            } finally {
-                _isLoading.value = false
+                _errorMessage.value = "Failed to add fat range: ${e.message}"
             }
         }
     }
 
+    /**
+     * Update existing fat range entry
+     * 1. Validate no overlap with existing ranges (excluding current entry)
+     * 2. Update local storage immediately
+     * 3. Sync to Firestore in background if online
+     */
     fun updateFatRow(row: FatRangeRow, isOnline: Boolean) {
         viewModelScope.launch {
             try {
-                _isLoading.value = true
+                // Round the float values to 3 decimal places to avoid precision issues
+                val roundedRow = row.copy(
+                    from = (row.from * 1000).roundToInt() / 1000f,
+                    to = (row.to * 1000).roundToInt() / 1000f
+                )
                 
-                // Validate the range doesn't overlap (excluding the current row being edited)
-                if (!validateFatRange(row, row.id)) {
+                // Use repository method that handles validation and sync
+                val success = repository.updateFatRowWithSync(roundedRow, isOnline)
+                
+                if (success) {
+                    // Update UI immediately without showing loader
+                    _fatTableRows.value = FatTableUtils.sortFatRanges(repository.getAllFatRows())
+                    _successMessage.value = "Fat range updated successfully!"
+                } else {
                     _errorMessage.value = "This fat range overlaps with an existing range. Please choose a different range."
-                    return@launch
                 }
-                
-                // Update locally with isSynced = false
-                repository.updateFatRow(row.copy(isSynced = false))
-                // Always sync when online, but don't block if offline
-                if (isOnline) {
-                    try {
-                        repository.uploadToFirestore(true)
-                    } catch (e: Exception) {
-                        // If sync fails, data is still saved locally
-                        _errorMessage.value = "Data saved locally. Will sync when online."
-                    }
-                }
-                _fatTableRows.value = repository.getAllFatRows()
             } catch (e: Exception) {
-                _errorMessage.value = e.message
-            } finally {
-                _isLoading.value = false
+                _errorMessage.value = "Failed to update fat range: ${e.message}"
             }
         }
     }
 
+    /**
+     * Delete fat range entry
+     * 1. Delete from local storage immediately
+     * 2. Delete from Firestore in background if online
+     */
     fun deleteFatRow(row: FatRangeRow, isOnline: Boolean) {
         viewModelScope.launch {
             try {
-                _isLoading.value = true
-                repository.deleteFatRow(row)
-                // Always sync when online, but don't block if offline
-                if (isOnline) {
-                    try {
-                        repository.uploadToFirestore(true)
-                    } catch (e: Exception) {
-                        // If sync fails, data is still saved locally
-                        _errorMessage.value = "Data saved locally. Will sync when online."
-                    }
+                // Use repository method that handles sync
+                val success = repository.deleteFatRowWithSync(row, isOnline)
+                
+                if (success) {
+                    // Update UI immediately without showing loader
+                    _fatTableRows.value = FatTableUtils.sortFatRanges(repository.getAllFatRows())
+                    _successMessage.value = "Fat range deleted successfully!"
+                } else {
+                    _errorMessage.value = "Failed to delete fat range"
                 }
-                _fatTableRows.value = repository.getAllFatRows()
             } catch (e: Exception) {
-                _errorMessage.value = e.message
-            } finally {
-                _isLoading.value = false
+                _errorMessage.value = "Failed to delete fat range: ${e.message}"
             }
         }
     }
 
-    // Validate if a fat range overlaps with existing ranges
-    fun validateFatRange(newRow: FatRangeRow, excludeId: Int? = null): Boolean {
-        val currentRows = _fatTableRows.value
-        
-        for (existingRow in currentRows) {
-            // Skip the row being edited
-            if (excludeId != null && existingRow.id == excludeId) {
-                continue
-            }
-            
-            // Check for overlap: new range overlaps with existing range
-            val overlaps = !(newRow.to <= existingRow.from || newRow.from >= existingRow.to)
-            
-            if (overlaps) {
-                android.util.Log.d("FatTableViewModel", "Range ${newRow.from}-${newRow.to} overlaps with existing range ${existingRow.from}-${existingRow.to}")
-                return false
-            }
+    /**
+     * Refresh data from Firestore (manual sync)
+     */
+    fun refreshData(isOnline: Boolean) {
+        if (!isOnline) {
+            _errorMessage.value = "Cannot refresh: No internet connection"
+            return
         }
         
-        return true
-    }
-    
-    // Sync data when internet becomes available
-    fun syncWhenOnline(isOnline: Boolean) {
-        if (isOnline) {
-            viewModelScope.launch {
-                try {
-                    repository.uploadToFirestore(true)
-                    repository.loadFromFirestore(true)
-                    _fatTableRows.value = repository.getAllFatRows()
-                } catch (e: Exception) {
-                    _errorMessage.value = "Sync failed: ${e.message}"
-                }
+        viewModelScope.launch {
+            try {
+                // First, handle any offline entries that need to be synced
+                repository.handleOfflineToOnlineSync()
+                
+                // Then do a complete sync
+                repository.syncWithFirestore()
+                
+                _fatTableRows.value = FatTableUtils.sortFatRanges(repository.getAllFatRows())
+                _successMessage.value = "Data refreshed successfully!"
+            } catch (e: Exception) {
+                _errorMessage.value = "Failed to refresh data: ${e.message}"
             }
         }
     }
     
-    // Force refresh data
-    fun forceRefreshData() {
+    /**
+     * Clean up duplicate entries
+     */
+    fun cleanupDuplicates() {
+        viewModelScope.launch {
+            try {
+                repository.cleanupDuplicateEntries()
+                val rows = repository.getAllFatRows()
+                _fatTableRows.value = FatTableUtils.sortFatRanges(rows)
+                _successMessage.value = "Duplicate entries cleaned up successfully!"
+            } catch (e: Exception) {
+                _errorMessage.value = "Failed to cleanup duplicates: ${e.message}"
+            }
+        }
+    }
+    
+    /**
+     * Force cleanup all duplicates (both local and Firestore)
+     */
+    fun forceCleanupAllDuplicates() {
         viewModelScope.launch {
             try {
                 _isLoading.value = true
-                isInitialized = false
-                initializeData(true)
+                repository.forceCleanupAllDuplicates()
+                val rows = repository.getAllFatRows()
+                _fatTableRows.value = FatTableUtils.sortFatRanges(rows)
+                _successMessage.value = "All duplicates cleaned up successfully!"
             } catch (e: Exception) {
-                _errorMessage.value = "Refresh failed: ${e.message}"
+                _errorMessage.value = "Failed to cleanup all duplicates: ${e.message}"
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+    
+    /**
+     * Emergency cleanup - removes all duplicates and resets sync state
+     */
+    fun emergencyCleanup() {
+        viewModelScope.launch {
+            try {
+                _isLoading.value = true
+                
+                // Force cleanup all duplicates
+                repository.forceCleanupAllDuplicates()
+                
+                // Mark all local entries as synced to prevent re-upload
+                val allRows = repository.getAllFatRows()
+                if (allRows.isNotEmpty()) {
+                    repository.markFatRowsAsSynced(allRows.map { it.id })
+                }
+                
+                val rows = repository.getAllFatRows()
+                _fatTableRows.value = FatTableUtils.sortFatRanges(rows)
+                _successMessage.value = "Emergency cleanup completed successfully!"
+            } catch (e: Exception) {
+                _errorMessage.value = "Failed to perform emergency cleanup: ${e.message}"
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+    
+    /**
+     * Fix precision issues in Firestore
+     */
+    fun fixPrecisionIssues() {
+        viewModelScope.launch {
+            try {
+                _isLoading.value = true
+                
+                // Force cleanup which includes precision fix
+                repository.forceCleanupAllDuplicates()
+                
+                val rows = repository.getAllFatRows()
+                _fatTableRows.value = FatTableUtils.sortFatRanges(rows)
+                _successMessage.value = "Precision issues fixed successfully!"
+            } catch (e: Exception) {
+                _errorMessage.value = "Failed to fix precision issues: ${e.message}"
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+    
+    /**
+     * Force fix all precision issues in Firestore immediately
+     */
+    fun forceFixPrecision() {
+        viewModelScope.launch {
+            try {
+                _isLoading.value = true
+                
+                // Force cleanup which includes precision fix
+                repository.forceCleanupAllDuplicates()
+                
+                // Also sync with Firestore to ensure all entries are properly formatted
+                repository.syncWithFirestore()
+                
+                val rows = repository.getAllFatRows()
+                _fatTableRows.value = FatTableUtils.sortFatRanges(rows)
+                _successMessage.value = "All precision issues fixed and synced successfully!"
+            } catch (e: Exception) {
+                _errorMessage.value = "Failed to fix precision issues: ${e.message}"
             } finally {
                 _isLoading.value = false
             }
         }
     }
 
+    /**
+     * Get price for a given fat percentage
+     * @param fatPercentage The fat percentage to get price for
+     * @return The price per liter for the given fat percentage, or 0.0 if no matching range
+     */
+    fun getPriceForFat(fatPercentage: Double): Double {
+        val rows = _fatTableRows.value
+        
+        // Find matching fat range
+        val matchingRow = rows.find { fatPercentage >= it.from && fatPercentage <= it.to }
+        
+        return matchingRow?.price ?: 0.0
+    }
+
+    /**
+     * Clear error and success messages
+     */
     fun clearMessages() {
         _errorMessage.value = null
+        _successMessage.value = null
+    }
+
+    /**
+     * Force refresh data (for testing or manual sync)
+     */
+    fun forceRefresh(isOnline: Boolean) {
+        isInitialized = false
+        initializeData(isOnline)
+    }
+    
+    /**
+     * Refresh UI with latest data from local storage
+     * This is called when real-time updates occur
+     */
+    fun refreshUI() {
+        viewModelScope.launch {
+            try {
+                val rows = repository.getAllFatRows()
+                _fatTableRows.value = FatTableUtils.sortFatRanges(rows)
+            } catch (e: Exception) {
+                android.util.Log.e("FatTableViewModel", "Error refreshing UI: ${e.message}")
+            }
+        }
+    }
+    
+    /**
+     * Handle offline-to-online transition
+     * This method is called when the app detects a network change from offline to online
+     */
+    fun handleOfflineToOnlineTransition() {
+        viewModelScope.launch {
+            try {
+                // Handle any offline entries that need to be synced (background operation)
+                repository.handleOfflineToOnlineSync()
+                
+                // Start real-time sync for immediate updates
+                repository.startRealTimeSync()
+                
+                // Then refresh the UI without showing loader
+                val rows = repository.getAllFatRows()
+                _fatTableRows.value = FatTableUtils.sortFatRanges(rows)
+                _successMessage.value = "Offline changes synced successfully!"
+                
+            } catch (e: Exception) {
+                _errorMessage.value = "Failed to sync offline changes: ${e.message}"
+            }
+        }
     }
 } 

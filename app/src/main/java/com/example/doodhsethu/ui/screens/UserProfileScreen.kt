@@ -185,7 +185,31 @@ fun UserProfileScreen(
                         }
                     },
                     actions = {
-                        IconButton(onClick = onLogout) {
+                        var showLogoutDialog by remember { mutableStateOf(false) }
+                        if (showLogoutDialog) {
+                            AlertDialog(
+                                onDismissRequest = { showLogoutDialog = false },
+                                title = { Text("Confirm Logout", fontFamily = PoppinsFont, fontWeight = FontWeight.Bold) },
+                                text = { Text("Are you sure you want to logout?", fontFamily = PoppinsFont) },
+                                confirmButton = {
+                                    Button(
+                                        onClick = {
+                                            showLogoutDialog = false
+                                            onLogout()
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue)
+                                    ) { Text("Logout", fontFamily = PoppinsFont, color = White) }
+                                },
+                                dismissButton = {
+                                    TextButton(onClick = { showLogoutDialog = false }) {
+                                        Text("Cancel", fontFamily = PoppinsFont, color = SecondaryBlue)
+                                    }
+                                },
+                                containerColor = White,
+                                shape = RoundedCornerShape(16.dp)
+                            )
+                        }
+                        IconButton(onClick = { showLogoutDialog = true }) {
                             Icon(
                                 painter = painterResource(id = R.drawable.ic_logout),
                                 contentDescription = "Logout",

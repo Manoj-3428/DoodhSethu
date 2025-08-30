@@ -1,6 +1,5 @@
 package com.example.doodhsethu.ui.viewmodels
 
-import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -14,6 +13,23 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.util.*
+import android.content.Context
+import android.os.Environment
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
+import java.io.File
+import java.io.FileWriter
+import java.io.IOException
+import java.io.OutputStreamWriter
+import java.nio.charset.StandardCharsets
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Intent
+import android.net.Uri
+import androidx.core.app.NotificationCompat
+import androidx.core.content.FileProvider
 
 enum class ReportPeriod {
     PREV_MONTH,
@@ -40,6 +56,9 @@ class MilkReportViewModel(private val context: Context) : ViewModel() {
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
     
+    private val _isExporting = MutableStateFlow(false)
+    val isExporting: StateFlow<Boolean> = _isExporting.asStateFlow()
+    
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
     
@@ -61,9 +80,19 @@ class MilkReportViewModel(private val context: Context) : ViewModel() {
             networkUtils.isOnline.collect { isOnline ->
                 _isOnline.value = isOnline
                 if (isOnline) {
+                    // Start real-time sync when online
+                    startRealTimeSync()
                     syncLocalWithFirestore()
+                } else {
+                    // Stop real-time sync when offline
+                    stopRealTimeSync()
                 }
             }
+        }
+        
+        // Set up callback for data changes
+        repository.setOnDataChangedCallback {
+            refreshData()
         }
     }
     
@@ -177,7 +206,12 @@ class MilkReportViewModel(private val context: Context) : ViewModel() {
                     amPrice = actualData?.amPrice ?: 0.0,
                     pmPrice = actualData?.pmPrice ?: 0.0,
                     totalQuantity = (actualData?.amQuantity ?: 0.0) + (actualData?.pmQuantity ?: 0.0),
-                    totalPrice = (actualData?.amPrice ?: 0.0) + (actualData?.pmPrice ?: 0.0)
+                    totalPrice = {
+                        // Use rounded values for AM and PM prices to avoid 1 Paisa difference
+                        val roundedAmPrice = String.format(Locale.getDefault(), "%.2f", actualData?.amPrice ?: 0.0).toDouble()
+                        val roundedPmPrice = String.format(Locale.getDefault(), "%.2f", actualData?.pmPrice ?: 0.0).toDouble()
+                        roundedAmPrice + roundedPmPrice
+                    }()
                 )
             )
             
@@ -186,11 +220,15 @@ class MilkReportViewModel(private val context: Context) : ViewModel() {
         }
         
         android.util.Log.d("MilkReportViewModel", "Generated $dayCount days total")
-        // For current month, show newest first (reverse order)
+        // For current month, show newest first (reverse order) using parsed dates
         return if (_selectedPeriod.value == ReportPeriod.CURR_MONTH) {
-            allEntries.sortedByDescending { it.date }
+            allEntries.sortedByDescending {
+                try { dateFormat.parse(it.date)?.time } catch (_: Exception) { null }
+            }
         } else {
-            allEntries.sortedBy { it.date }
+            allEntries.sortedBy {
+                try { dateFormat.parse(it.date)?.time } catch (_: Exception) { null }
+            }
         }
     }
     
@@ -317,6 +355,254 @@ class MilkReportViewModel(private val context: Context) : ViewModel() {
     fun clearFarmerDetails() {
         _farmerDetails.value = emptyList()
         _selectedDate.value = null
+    }
+    
+    /**
+     * Start real-time sync
+     */
+    private fun startRealTimeSync() {
+        viewModelScope.launch {
+            try {
+                repository.startRealTimeSync()
+                android.util.Log.d("MilkReportViewModel", "Real-time sync started")
+            } catch (e: Exception) {
+                android.util.Log.e("MilkReportViewModel", "Error starting real-time sync: ${e.message}")
+            }
+        }
+    }
+    
+    /**
+     * Stop real-time sync
+     */
+    private fun stopRealTimeSync() {
+        viewModelScope.launch {
+            try {
+                repository.stopRealTimeSync()
+                android.util.Log.d("MilkReportViewModel", "Real-time sync stopped")
+            } catch (e: Exception) {
+                android.util.Log.e("MilkReportViewModel", "Error stopping real-time sync: ${e.message}")
+            }
+        }
+    }
+    
+    /**
+     * Refresh data when real-time updates are received
+     */
+    private fun refreshData() {
+        viewModelScope.launch {
+            try {
+                // Reload current report data
+                loadReportData()
+            } catch (e: Exception) {
+                android.util.Log.e("MilkReportViewModel", "Error refreshing data: ${e.message}")
+            }
+        }
+    }
+    
+    /**
+     * Export milk report data to Excel CSV format (non-suspend wrapper)
+     */
+    fun exportToExcel() {
+        viewModelScope.launch {
+            exportToExcelSuspend()
+        }
+    }
+    
+    /**
+     * Show download confirmation dialog
+     */
+    fun confirmAndExport() {
+        showDownloadConfirmation()
+    }
+    
+    /**
+     * Export milk report data to Excel CSV format
+     */
+    private suspend fun exportToExcelSuspend(): String? {
+        // Check for storage permission (only needed for Android < 10)
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) 
+                != PackageManager.PERMISSION_GRANTED) {
+                _errorMessage.value = "Storage permission required to export Excel file"
+                return null
+            }
+        }
+        
+        _isExporting.value = true
+        return try {
+            val reportEntries = _reportEntries.value
+            if (reportEntries.isEmpty()) {
+                _errorMessage.value = "No data available to export"
+                return null
+            }
+            
+            // Get all unique farmer IDs from the data
+            val allFarmerIds = mutableSetOf<String>()
+            val farmerDataMap = mutableMapOf<String, MutableMap<String, Pair<Double, Double>>>() // date -> farmerId -> (milk, amount)
+            
+            // Collect all farmer data
+            for (entry in reportEntries) {
+                if (entry.amQuantity > 0 || entry.pmQuantity > 0) {
+                    // Get farmer details for this date
+                    val farmerDetails = repository.getFarmerMilkDetailsForDateSync(entry.date)
+                    for (farmer in farmerDetails) {
+                        allFarmerIds.add(farmer.farmerId)
+                        if (!farmerDataMap.containsKey(entry.date)) {
+                            farmerDataMap[entry.date] = mutableMapOf()
+                        }
+                        farmerDataMap[entry.date]!![farmer.farmerId] = Pair(farmer.totalMilk, farmer.totalPrice)
+                    }
+                }
+            }
+            
+            val sortedFarmerIds = allFarmerIds.sortedBy { it.toIntOrNull() ?: Int.MAX_VALUE }
+            val sortedDates = reportEntries.map { it.date }.sorted()
+            
+            // Create CSV content
+            val csvBuilder = StringBuilder()
+            
+            // Header row: Date, Farmer1, Farmer2, ...
+            csvBuilder.append("Date")
+            for (farmerId in sortedFarmerIds) {
+                csvBuilder.append(",\"Farmer $farmerId\"")
+            }
+            csvBuilder.append("\n")
+            
+                         // Data rows
+             for (date in sortedDates) {
+                 csvBuilder.append("\"$date\"")
+                 for (farmerId in sortedFarmerIds) {
+                     val farmerData = farmerDataMap[date]?.get(farmerId)
+                     if (farmerData != null) {
+                         val (milk, amount) = farmerData
+                         csvBuilder.append(",\"${String.format("%.2f", milk)}L (₹${String.format("%.2f", amount)})\"")
+                     } else {
+                         // Show zero values when no data is present
+                         csvBuilder.append(",\"0.00L (₹0.00)\"")
+                     }
+                 }
+                 csvBuilder.append("\n")
+             }
+            
+                         // Save to file with UTF-8 encoding and BOM for Excel compatibility
+             val fileName = "milk_report_${_selectedPeriod.value.name.lowercase()}_${System.currentTimeMillis()}.csv"
+             val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+             val file = File(downloadsDir, fileName)
+             
+                           // Write with UTF-8 encoding and BOM for Excel compatibility
+              file.outputStream().use { outputStream ->
+                  // Write BOM (Byte Order Mark) for UTF-8
+                  outputStream.write(0xEF)
+                  outputStream.write(0xBB)
+                  outputStream.write(0xBF)
+                  
+                  // Write the CSV content
+                  OutputStreamWriter(outputStream, StandardCharsets.UTF_8).use { writer ->
+                      writer.write(csvBuilder.toString())
+                  }
+              }
+            
+                         android.util.Log.d("MilkReportViewModel", "Excel export saved to: ${file.absolutePath}")
+             _successMessage.value = "File downloaded successfully"
+             
+             // Show notification with click to open
+             showNotification(file, fileName)
+             
+             file.absolutePath
+        } catch (e: Exception) {
+            android.util.Log.e("MilkReportViewModel", "Error exporting to Excel: ${e.message}")
+            _errorMessage.value = "Failed to export Excel: ${e.message}"
+            null
+        } finally {
+            _isExporting.value = false
+        }
+    }
+    
+    private val _successMessage = MutableStateFlow<String?>(null)
+    val successMessage: StateFlow<String?> = _successMessage.asStateFlow()
+    
+    private val _showDownloadDialog = MutableStateFlow(false)
+    val showDownloadDialog: StateFlow<Boolean> = _showDownloadDialog.asStateFlow()
+    
+    fun clearSuccessMessage() {
+        _successMessage.value = null
+    }
+    
+    fun showDownloadConfirmation() {
+        _showDownloadDialog.value = true
+    }
+    
+    fun hideDownloadDialog() {
+        _showDownloadDialog.value = false
+    }
+    
+    /**
+     * Show notification with click to open file
+     */
+    private fun showNotification(file: File, fileName: String) {
+        android.util.Log.d("MilkReportViewModel", "Attempting to show notification for file: $fileName")
+        
+        // Check notification permission for Android 13+
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) 
+                != PackageManager.PERMISSION_GRANTED) {
+                android.util.Log.w("MilkReportViewModel", "Notification permission not granted")
+                return
+            }
+        }
+        
+        try {
+            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            
+            // Create notification channel for Android 8.0+
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                val channel = NotificationChannel(
+                    "file_download",
+                    "File Downloads",
+                    NotificationManager.IMPORTANCE_DEFAULT
+                ).apply {
+                    description = "Notifications for downloaded files"
+                }
+                notificationManager.createNotificationChannel(channel)
+            }
+            
+            // Create intent to open file
+            val fileUri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.provider",
+                file
+            )
+            
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(fileUri, "text/csv")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            
+            val pendingIntent = PendingIntent.getActivity(
+                context,
+                0,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            
+                         // Build notification
+             val notification = NotificationCompat.Builder(context, "file_download")
+                 .setContentTitle("Report Downloaded")
+                 .setContentText("Click to see your reports")
+                 .setSmallIcon(android.R.drawable.stat_sys_download_done)
+                 .setContentIntent(pendingIntent)
+                 .setAutoCancel(true)
+                 .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                 .build()
+            
+                         // Show notification
+             notificationManager.notify(System.currentTimeMillis().toInt(), notification)
+             android.util.Log.d("MilkReportViewModel", "Notification sent successfully")
+             
+         } catch (e: Exception) {
+             android.util.Log.e("MilkReportViewModel", "Error showing notification: ${e.message}")
+             e.printStackTrace()
+         }
     }
 }
 

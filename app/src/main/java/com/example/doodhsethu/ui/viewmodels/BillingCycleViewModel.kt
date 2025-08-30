@@ -43,6 +43,14 @@ class BillingCycleViewModel(private val context: Context) : ViewModel() {
 
     init {
         loadBillingCycles()
+        
+        // Set up callback for data changes
+        repository.setOnDataChangedCallback {
+            refreshData()
+        }
+        
+        // Start real-time sync
+        startRealTimeSync()
     }
 
     // Load billing cycles with automatic sync
@@ -346,6 +354,62 @@ class BillingCycleViewModel(private val context: Context) : ViewModel() {
         isInitialized = false
         lastLoadTime = 0L
         android.util.Log.d("BillingCycleViewModel", "Cache cleared manually")
+    }
+    
+    /**
+     * Start real-time sync
+     */
+    private fun startRealTimeSync() {
+        viewModelScope.launch {
+            try {
+                repository.startRealTimeSync()
+                android.util.Log.d("BillingCycleViewModel", "Real-time sync started")
+            } catch (e: Exception) {
+                android.util.Log.e("BillingCycleViewModel", "Error starting real-time sync: ${e.message}")
+            }
+        }
+    }
+    
+    /**
+     * Stop real-time sync
+     */
+    private fun stopRealTimeSync() {
+        viewModelScope.launch {
+            try {
+                repository.stopRealTimeSync()
+                android.util.Log.d("BillingCycleViewModel", "Real-time sync stopped")
+            } catch (e: Exception) {
+                android.util.Log.e("BillingCycleViewModel", "Error stopping real-time sync: ${e.message}")
+            }
+        }
+    }
+    
+    /**
+     * Refresh data when real-time updates are received
+     */
+    private fun refreshData() {
+        viewModelScope.launch {
+            try {
+                android.util.Log.d("BillingCycleViewModel", "Refreshing data from real-time sync")
+                
+                // Get the latest data directly from the repository
+                val updatedCycles = repository.getAllBillingCycles().first()
+                _billingCycles.value = updatedCycles
+                
+                // Load farmer details for the updated cycles
+                loadFarmerDetailsForCycles(updatedCycles)
+                
+                android.util.Log.d("BillingCycleViewModel", "Data refreshed from real-time sync: ${updatedCycles.size} cycles")
+            } catch (e: Exception) {
+                android.util.Log.e("BillingCycleViewModel", "Error refreshing data: ${e.message}")
+            }
+        }
+    }
+    
+    override fun onCleared() {
+        super.onCleared()
+        stopRealTimeSync()
+        android.util.Log.d("BillingCycleViewModel", "ViewModel cleared, real-time sync stopped")
     }
 }
 

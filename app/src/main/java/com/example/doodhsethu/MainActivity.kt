@@ -80,7 +80,7 @@ class MainActivity : ComponentActivity() {
 fun AuthApp() {
     var isLogin by remember { mutableStateOf(true) }
     var isAuthenticated by remember { mutableStateOf(false) }
-    var currentScreen by remember { mutableStateOf("dashboard") }
+    var currentScreen by remember { mutableStateOf("milk_collection") }
     var isLoading by remember { mutableStateOf(false) }
     var isSessionChecked by remember { mutableStateOf(false) }  // Track if session check is complete
     var isDataRestoring by remember { mutableStateOf(false) }
@@ -124,8 +124,8 @@ fun AuthApp() {
                 if (storedUser != null) {
                     currentUser = storedUser
                     isAuthenticated = true
-                    // Set to dashboard screen (already set as initial)
-                    currentScreen = "dashboard"
+                    // Set to milk collection as home
+                    currentScreen = "milk_collection"
                     // Restore the auth state from storage
                     authViewModel.restoreSessionFromStorage(context)
                     android.util.Log.d("MainActivity", "Session restored for user: ${storedUser.name}")
@@ -159,13 +159,13 @@ fun AuthApp() {
         }
     }
 
-    // Listen for farmer deletion success and navigate to dashboard
+    // Listen for farmer deletion success and navigate to home milk collection
     LaunchedEffect(farmerSuccessMessage) {
         if (farmerSuccessMessage == "Farmer deleted successfully!") {
-            currentScreen = "dashboard"
+            currentScreen = "milk_collection"
             selectedFarmer = null
             farmerViewModel.clearMessages() // Clear the success message
-            android.util.Log.d("MainActivity", "Farmer deleted successfully, navigated to dashboard")
+            android.util.Log.d("MainActivity", "Farmer deleted successfully, navigated to milk_collection")
         }
     }
 
@@ -252,13 +252,14 @@ fun AuthApp() {
     } else if (!isAuthenticated && isSessionChecked) {
         // Show login screen when not authenticated and session check is complete
         AuthScreen(
-            isLogin = isLogin,
-            onToggleMode = { isLogin = !isLogin },
+            isLogin = true, // Always login mode - register temporarily disabled
+            onToggleMode = { /* Register toggle disabled */ }, // Register toggle disabled
             onLogin = { userId, password ->
                 authViewModel.login(userId, password, context)
             },
             onRegister = { userId, name, password ->
-                authViewModel.register(userId, name, password, context)
+                // Register functionality temporarily disabled
+                // authViewModel.register(userId, name, password, context)
             },
             onAuthSuccess = {
                 // This will be handled by the LaunchedEffect(authState)
@@ -313,11 +314,11 @@ fun AuthApp() {
             
             "add_farmer" -> {
                 AddFarmerScreen(
-                    onNavigateBack = { currentScreen = "dashboard" },
+                    onNavigateBack = { currentScreen = "milk_collection" },
                     editFarmer = editFarmer,
                     onFarmerAdded = {
                         editFarmer = null
-                        currentScreen = "dashboard"
+                        currentScreen = "milk_collection"
                     }
                 )
             }
@@ -331,7 +332,7 @@ fun AuthApp() {
                         // Stay on the same screen - don't navigate to dashboard
                         // AutoSyncManager will handle farmer profile updates
                     },
-                    onNavigateBack = { currentScreen = "dashboard" },
+                    onNavigateBack = { currentScreen = "milk_collection" },
                     prefillFarmerId = prefillFarmerId,
                     onNavigateToDashboard = { currentScreen = "dashboard" },
                     onNavigateToAddFarmer = { currentScreen = "add_farmer" },
@@ -347,7 +348,7 @@ fun AuthApp() {
             "profile" -> {
                 // Always pass the latest currentUser
                 UserProfileScreen(
-                    onNavigateBack = { currentScreen = "dashboard" },
+                    onNavigateBack = { currentScreen = "milk_collection" },
                     currentUser = currentUser,
                     onLogout = {
                         authViewModel.logout(context)
@@ -356,12 +357,12 @@ fun AuthApp() {
             }
             
             "fat_table" -> {
-                FatTableScreenNew(onNavigateBack = { currentScreen = "dashboard" })
+                FatTableScreenNew(onNavigateBack = { currentScreen = "milk_collection" })
             }
             
             "milk_reports" -> {
                 MilkReportsScreen(
-                    onNavigateBack = { currentScreen = "dashboard" },
+                    onNavigateBack = { currentScreen = "milk_collection" },
                     onNavigateToFarmerDetails = { date ->
                         selectedDate = date
                         currentScreen = "farmer_details"
@@ -380,7 +381,7 @@ fun AuthApp() {
             
             "billing_cycles" -> {
                 BillingCycleScreen(onNavigateBack = { 
-                    currentScreen = "dashboard"
+                    currentScreen = "milk_collection"
                     // AutoSyncManager will handle farmer profile updates
                 })
             }
@@ -389,7 +390,7 @@ fun AuthApp() {
             
             "user_reports" -> {
                 UserReportsScreen(
-                    onNavigateBack = { currentScreen = "dashboard" },
+                    onNavigateBack = { currentScreen = "milk_collection" },
                     preSelectedFarmer = selectedFarmer,
                     preFilledFarmerId = selectedFarmer?.id
                 )

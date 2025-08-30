@@ -18,8 +18,6 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 
 import com.google.firebase.firestore.FirebaseFirestore
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.tasks.await
 
 class BillingCycleRepository(private val context: Context) {
@@ -28,10 +26,17 @@ class BillingCycleRepository(private val context: Context) {
     private val farmerBillingDetailDao = db.farmerBillingDetailDao()
     private val farmerRepository = FarmerRepository(context)
     private val dailyMilkCollectionRepository = DailyMilkCollectionRepository(context)
-    private val billingCycleSummaryRepository = BillingCycleSummaryRepository(context)
+    // private val billingCycleSummaryRepository = BillingCycleSummaryRepository(context)
     private val networkUtils = NetworkUtils(context)
     private val firestore = FirebaseFirestore.getInstance()
     private val authViewModel = AuthViewModel()
+    
+    // Real-time sync state
+    private var isRealTimeSyncActive = false
+    private var realTimeSyncJob: kotlinx.coroutines.Job? = null
+    
+    // Callback for UI updates
+    private var onDataChangedCallback: (() -> Unit)? = null
     
 
 
@@ -204,12 +209,12 @@ class BillingCycleRepository(private val context: Context) {
     
     // Initialize billing cycle summaries for all farmers
     // DISABLED: This was creating corrupted billing cycle documents inside farmer profiles
-    private suspend fun initializeBillingCycleSummaries(billingCycleId: String, farmers: List<Farmer>) {
-        // DISABLED: This functionality was creating corrupted billing cycle documents
-        // inside farmer profiles. Billing cycles should only be in the main billing cycles collection.
-        android.util.Log.d("BillingCycleRepository", "initializeBillingCycleSummaries DISABLED to prevent corruption")
-        return
-    }
+    // private suspend fun initializeBillingCycleSummaries(billingCycleId: String, farmers: List<Farmer>) {
+    //     // DISABLED: This functionality was creating corrupted billing cycle documents
+    //     // inside farmer profiles. Billing cycles should only be in the main billing cycles collection.
+    //     android.util.Log.d("BillingCycleRepository", "initializeBillingCycleSummaries DISABLED to prevent corruption")
+    //     return
+    // }
 
     // Delete a billing cycle
     suspend fun deleteBillingCycle(billingCycle: BillingCycle) {
@@ -723,13 +728,13 @@ class BillingCycleRepository(private val context: Context) {
                                     val farmerBillingDetail = FarmerBillingDetail(
                                         id = farmerDetailId,
                                         farmerId = farmerId,
-                                        farmerName = farmerData?.get("farmer_name") as? String ?: "",
+                                        farmerName = farmerData.get("farmer_name") as? String ?: "",
                                         billingCycleId = cycleId,
-                                        originalAmount = (farmerData?.get("original_amount") as? Number)?.toDouble() ?: 0.0,
-                                        paidAmount = (farmerData?.get("paid_amount") as? Number)?.toDouble() ?: 0.0,
-                                        balanceAmount = (farmerData?.get("balance_amount") as? Number)?.toDouble() ?: 0.0,
-                                        isPaid = farmerData?.get("is_paid") as? Boolean ?: true,
-                                        paymentDate = (farmerData?.get("payment_date") as? com.google.firebase.Timestamp)?.toDate() ?: Date(),
+                                        originalAmount = (farmerData.get("original_amount") as? Number)?.toDouble() ?: 0.0,
+                                        paidAmount = (farmerData.get("paid_amount") as? Number)?.toDouble() ?: 0.0,
+                                        balanceAmount = (farmerData.get("balance_amount") as? Number)?.toDouble() ?: 0.0,
+                                        isPaid = farmerData.get("is_paid") as? Boolean ?: true,
+                                        paymentDate = (farmerData.get("payment_date") as? com.google.firebase.Timestamp)?.toDate() ?: Date(),
                                         isSynced = true
                                     )
                                     
@@ -771,17 +776,17 @@ class BillingCycleRepository(private val context: Context) {
     /**
      * Helper function to parse dates from billing cycle ID format: billing_YYYYMMDD_YYYYMMDD
      */
-    private fun parseDateFromBillingCycleId(billingCycleId: String, isStartDate: Boolean): Date {
-        val datePattern = Regex("billing_(\\d{8})_(\\d{8})")
-        val match = datePattern.find(billingCycleId)
-        return if (match != null) {
-            val dateStr = if (isStartDate) match.groupValues[1] else match.groupValues[2]
-            val dateFormat = SimpleDateFormat("yyyyMMdd", Locale.getDefault())
-            dateFormat.parse(dateStr) ?: Date()
-        } else {
-            Date() // Fallback to current date if ID format is unexpected
-        }
-    }
+    // private fun parseDateFromBillingCycleId(billingCycleId: String, isStartDate: Boolean): Date {
+    //     val datePattern = Regex("billing_(\\d{8})_(\\d{8})")
+    //     val match = datePattern.find(billingCycleId)
+    //     return if (match != null) {
+    //         val dateStr = if (isStartDate) match.groupValues[1] else match.groupValues[2]
+    //         val dateFormat = SimpleDateFormat("yyyyMMdd", Locale.getDefault())
+    //         dateFormat.parse(dateStr) ?: Date()
+    //     } else {
+    //         Date() // Fallback to current date if ID format is unexpected
+    //     }
+    // }
 
     /**
      * Check for billing cycles in global path and migrate them to user-specific paths
@@ -1029,5 +1034,223 @@ class BillingCycleRepository(private val context: Context) {
         } catch (e: Exception) {
             android.util.Log.e("BillingCycleRepository", "Error during cleanup of corrupted billing cycle documents: ${e.message}")
         }
+    }
+    
+    /**
+     * Set callback for data changes
+     */
+    fun setOnDataChangedCallback(callback: () -> Unit) {
+        onDataChangedCallback = callback
+    }
+    
+    /**
+     * Start real-time sync with Firestore
+     */
+    fun startRealTimeSync() {
+        if (isRealTimeSyncActive) {
+            android.util.Log.d("BillingCycleRepository", "Real-time sync already active")
+            return
+        }
+        
+        isRealTimeSyncActive = true
+        realTimeSyncJob = CoroutineScope(Dispatchers.IO).launch {
+            try {
+                android.util.Log.d("BillingCycleRepository", "Starting real-time sync with Firestore")
+                
+                val userId = authViewModel.getStoredUser(context)?.userId
+                if (userId == null) {
+                    android.util.Log.e("BillingCycleRepository", "Cannot start real-time sync: User not authenticated")
+                    return@launch
+                }
+                
+                // Set up real-time listener for billing cycles
+                firestore.collection("users")
+                    .document(userId)
+                    .collection("billing_cycles")
+                    .addSnapshotListener { snapshot, error ->
+                        if (error != null) {
+                            android.util.Log.e("BillingCycleRepository", "Real-time sync error: ${error.message}")
+                            return@addSnapshotListener
+                        }
+                        
+                        if (snapshot != null) {
+                            CoroutineScope(Dispatchers.IO).launch {
+                                try {
+                                    // Process real-time updates
+                                    processRealTimeUpdates(snapshot)
+                                } catch (e: Exception) {
+                                    android.util.Log.e("BillingCycleRepository", "Error processing real-time updates: ${e.message}")
+                                }
+                            }
+                        }
+                    }
+                
+                android.util.Log.d("BillingCycleRepository", "Real-time sync listener established")
+            } catch (e: Exception) {
+                android.util.Log.e("BillingCycleRepository", "Error starting real-time sync: ${e.message}")
+                isRealTimeSyncActive = false
+            }
+        }
+    }
+    
+    /**
+     * Stop real-time sync
+     */
+    fun stopRealTimeSync() {
+        if (!isRealTimeSyncActive) {
+            return
+        }
+        
+        isRealTimeSyncActive = false
+        realTimeSyncJob?.cancel()
+        realTimeSyncJob = null
+        android.util.Log.d("BillingCycleRepository", "Real-time sync stopped")
+    }
+    
+    /**
+     * Process real-time updates from Firestore
+     */
+    private suspend fun processRealTimeUpdates(snapshot: com.google.firebase.firestore.QuerySnapshot) = withContext(Dispatchers.IO) {
+        try {
+            android.util.Log.d("BillingCycleRepository", "Processing real-time updates for billing cycles")
+            
+            val userId = authViewModel.getStoredUser(context)?.userId
+            if (userId == null) {
+                android.util.Log.e("BillingCycleRepository", "Cannot process updates: User not authenticated")
+                return@withContext
+            }
+            
+            // Process each billing cycle document
+            for (cycleDoc in snapshot.documents) {
+                val cycleId = cycleDoc.id
+                val data = cycleDoc.data
+                
+                if (data != null) {
+                    try {
+                        // Convert Firestore data to BillingCycle
+                        val billingCycle = convertFirestoreDataToBillingCycle(data, cycleId)
+                        
+                        // Check if cycle already exists
+                        val existingCycle = billingCycleDao.getBillingCycleById(cycleId)
+                        if (existingCycle == null) {
+                            // Insert new cycle
+                            billingCycleDao.insertBillingCycle(billingCycle)
+                            android.util.Log.d("BillingCycleRepository", "Added new billing cycle from real-time sync: ${billingCycle.name}")
+                        } else {
+                            // Update existing cycle
+                            billingCycleDao.updateBillingCycle(billingCycle)
+                            android.util.Log.d("BillingCycleRepository", "Updated billing cycle from real-time sync: ${billingCycle.name}")
+                        }
+                        
+                        // Process farmer billing details for this cycle
+                        processFarmerBillingDetails(cycleId, userId)
+                        
+                    } catch (e: Exception) {
+                        android.util.Log.e("BillingCycleRepository", "Error processing billing cycle $cycleId: ${e.message}")
+                    }
+                }
+            }
+            
+            // Notify UI of data changes
+            onDataChangedCallback?.invoke()
+            
+        } catch (e: Exception) {
+            android.util.Log.e("BillingCycleRepository", "Error processing real-time updates: ${e.message}")
+        }
+    }
+    
+    /**
+     * Convert Firestore data to BillingCycle
+     */
+    private fun convertFirestoreDataToBillingCycle(data: Map<String, Any>, cycleId: String): BillingCycle {
+        val name = data["name"] as? String ?: ""
+        val startDate = (data["startDate"] as? com.google.firebase.Timestamp)?.toDate() ?: Date()
+        val endDate = (data["endDate"] as? com.google.firebase.Timestamp)?.toDate() ?: Date()
+        val totalAmount = (data["totalAmount"] as? Number)?.toDouble() ?: 0.0
+        val isActive = data["isActive"] as? Boolean ?: true
+        val createdAt = (data["createdAt"] as? com.google.firebase.Timestamp)?.toDate() ?: Date()
+        
+        return BillingCycle(
+            id = cycleId,
+            name = name,
+            startDate = startDate,
+            endDate = endDate,
+            totalAmount = totalAmount,
+            isActive = isActive,
+            createdAt = createdAt,
+            isSynced = true
+        )
+    }
+    
+    /**
+     * Process farmer billing details for a billing cycle
+     */
+    private suspend fun processFarmerBillingDetails(cycleId: String, userId: String) {
+        try {
+            // Get farmer billing details from Firestore
+            val detailsSnapshot = firestore.collection("users")
+                .document(userId)
+                .collection("billing_cycles")
+                .document(cycleId)
+                .collection("farmer_details")
+                .get()
+                .await()
+            
+            for (detailDoc in detailsSnapshot.documents) {
+                val detailId = detailDoc.id
+                val data = detailDoc.data
+                
+                if (data != null) {
+                    try {
+                        // Convert Firestore data to FarmerBillingDetail
+                        val billingDetail = convertFirestoreDataToFarmerBillingDetail(data, detailId, cycleId)
+                        
+                        // Check if detail already exists
+                        val existingDetail = farmerBillingDetailDao.getFarmerBillingDetailById(detailId)
+                        if (existingDetail == null) {
+                            // Insert new detail
+                            farmerBillingDetailDao.insertFarmerBillingDetail(billingDetail)
+                            android.util.Log.d("BillingCycleRepository", "Added new farmer billing detail from real-time sync: ${billingDetail.farmerName}")
+                        } else {
+                            // Update existing detail
+                            farmerBillingDetailDao.updateFarmerBillingDetail(billingDetail)
+                            android.util.Log.d("BillingCycleRepository", "Updated farmer billing detail from real-time sync: ${billingDetail.farmerName}")
+                        }
+                        
+                    } catch (e: Exception) {
+                        android.util.Log.e("BillingCycleRepository", "Error processing farmer billing detail $detailId: ${e.message}")
+                    }
+                }
+            }
+            
+        } catch (e: Exception) {
+            android.util.Log.e("BillingCycleRepository", "Error processing farmer billing details for cycle $cycleId: ${e.message}")
+        }
+    }
+    
+    /**
+     * Convert Firestore data to FarmerBillingDetail
+     */
+    private fun convertFirestoreDataToFarmerBillingDetail(data: Map<String, Any>, detailId: String, cycleId: String): FarmerBillingDetail {
+        val farmerId = data["farmerId"] as? String ?: ""
+        val farmerName = data["farmerName"] as? String ?: ""
+        val originalAmount = (data["originalAmount"] as? Number)?.toDouble() ?: 0.0
+        val paidAmount = (data["paidAmount"] as? Number)?.toDouble() ?: 0.0
+        val balanceAmount = (data["balanceAmount"] as? Number)?.toDouble() ?: 0.0
+        val isPaid = data["isPaid"] as? Boolean ?: false
+        val paymentDate = (data["paymentDate"] as? com.google.firebase.Timestamp)?.toDate()
+        
+        return FarmerBillingDetail(
+            id = detailId,
+            billingCycleId = cycleId,
+            farmerId = farmerId,
+            farmerName = farmerName,
+            originalAmount = originalAmount,
+            paidAmount = paidAmount,
+            balanceAmount = balanceAmount,
+            isPaid = isPaid,
+            paymentDate = paymentDate,
+            isSynced = true
+        )
     }
 }

@@ -14,7 +14,7 @@ class NetworkUtils(private val context: Context) {
     private val _isOnline = MutableStateFlow(false)
     val isOnline: StateFlow<Boolean> = _isOnline.asStateFlow()
     
-    private val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+    private val connectivityManager = context.applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
@@ -45,6 +45,9 @@ class NetworkUtils(private val context: Context) {
         android.util.Log.d("NetworkUtils", "Starting network monitoring")
         val networkRequest = NetworkRequest.Builder()
             .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR)
+            .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+            .addTransportType(NetworkCapabilities.TRANSPORT_ETHERNET)
             .build()
         connectivityManager.registerNetworkCallback(networkRequest, networkCallback)
         
@@ -54,7 +57,11 @@ class NetworkUtils(private val context: Context) {
     
     fun stopMonitoring() {
         android.util.Log.d("NetworkUtils", "Stopping network monitoring")
-        connectivityManager.unregisterNetworkCallback(networkCallback)
+        try {
+            connectivityManager.unregisterNetworkCallback(networkCallback)
+        } catch (_: Exception) {
+            // Ignore if already unregistered
+        }
     }
     
     private fun checkCurrentNetworkState() {

@@ -34,6 +34,8 @@ import com.example.doodhsethu.ui.viewmodels.DailyMilkCollectionViewModel
 import com.example.doodhsethu.ui.viewmodels.DailyMilkCollectionViewModelFactory
 import com.example.doodhsethu.ui.viewmodels.FarmerViewModel
 import com.example.doodhsethu.ui.viewmodels.FarmerViewModelFactory
+import com.example.doodhsethu.ui.viewmodels.FatTableViewModel
+import com.example.doodhsethu.ui.viewmodels.FatTableViewModelFactory
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -43,12 +45,14 @@ fun DailyMilkCollectionScreen(
     val context = LocalContext.current
     val dailyViewModel: DailyMilkCollectionViewModel = viewModel(factory = DailyMilkCollectionViewModelFactory(context))
     val farmerViewModel: FarmerViewModel = viewModel(factory = FarmerViewModelFactory(context))
+    val fatTableViewModel: FatTableViewModel = viewModel(factory = FatTableViewModelFactory(context))
     
     val todayCollections by dailyViewModel.todayCollections.collectAsState()
     val isLoading by dailyViewModel.isLoading.collectAsState()
     val errorMessage by dailyViewModel.errorMessage.collectAsState()
     val successMessage by dailyViewModel.successMessage.collectAsState()
     val farmers by farmerViewModel.farmers.collectAsState()
+    val fatTableRows by fatTableViewModel.fatTableRows.collectAsState()
     
     var selectedFarmerId by remember { mutableStateOf("") }
     var selectedSession by remember { mutableStateOf("AM") }
@@ -58,6 +62,7 @@ fun DailyMilkCollectionScreen(
     
     LaunchedEffect(Unit) {
         farmerViewModel.loadFarmers()
+        fatTableViewModel.initializeData(true) // Initialize fat table data
     }
     
     // Clear messages after 3 seconds
@@ -296,6 +301,7 @@ fun DailyMilkCollectionScreen(
         UpdateCollectionDialog(
             farmerId = selectedFarmerId,
             session = selectedSession,
+            fatTableRows = fatTableRows,
             onSessionChange = { selectedSession = it },
             onDismiss = { 
                 // Only allow dismissal if not currently loading
@@ -488,6 +494,7 @@ fun SessionInfo(
 fun UpdateCollectionDialog(
     farmerId: String,
     session: String,
+    fatTableRows: List<com.example.doodhsethu.data.models.FatRangeRow>,
     onSessionChange: (String) -> Unit,
     onDismiss: () -> Unit,
     onUpdate: (Double, Double, Double) -> Unit
@@ -496,6 +503,17 @@ fun UpdateCollectionDialog(
     var fatPercentage by remember { mutableStateOf("") }
     var price by remember { mutableStateOf("") }
     var isUpdating by remember { mutableStateOf(false) }
+    
+    // Auto-calculate price when fat percentage changes
+    LaunchedEffect(fatPercentage) {
+        val fatValue = fatPercentage.toDoubleOrNull()
+        if (fatValue != null && fatValue > 0) {
+            val calculatedPrice = com.example.doodhsethu.utils.FatTableUtils.getPriceForFat(fatValue, fatTableRows)
+            if (calculatedPrice > 0) {
+                price = calculatedPrice.toString()
+            }
+        }
+    }
     
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -550,9 +568,10 @@ fun UpdateCollectionDialog(
                 OutlinedTextField(
                     value = price,
                     onValueChange = { price = it },
-                    label = { Text("Price (₹)") },
+                    label = { Text("Price (₹) - Auto-calculated") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    readOnly = true
                 )
                 
                 if (isUpdating) {
@@ -573,7 +592,7 @@ fun UpdateCollectionDialog(
                     onUpdate(milk, fat, priceValue)
                     // Note: Dialog will be dismissed by the parent component after update completes
                 },
-                enabled = !isUpdating && milkQuantity.isNotEmpty() && fatPercentage.isNotEmpty() && price.isNotEmpty()
+                enabled = !isUpdating && milkQuantity.isNotEmpty() && fatPercentage.isNotEmpty()
             ) {
                 Text("Update")
             }

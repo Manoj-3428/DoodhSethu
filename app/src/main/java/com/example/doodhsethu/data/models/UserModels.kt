@@ -46,9 +46,9 @@ sealed class NavigationItem(
     val icon: Int,
     val route: String
 ) {
-    object Home : NavigationItem("Home", com.example.doodhsethu.R.drawable.ic_home, "home")
+    object Home : NavigationItem("Farmers", com.example.doodhsethu.R.drawable.ic_groups, "home")
     object AddFarmer : NavigationItem("Add Farmer", com.example.doodhsethu.R.drawable.ic_add, "add_farmer")
-    object MilkCollection : NavigationItem("Milk Collection", com.example.doodhsethu.R.drawable.ic_local_drink, "milk_collection")
+    object MilkCollection : NavigationItem("Home Milk Collection", com.example.doodhsethu.R.drawable.ic_local_drink, "milk_collection")
     object Profile : NavigationItem("Profile", com.example.doodhsethu.R.drawable.ic_person, "profile")
     object Reports : NavigationItem("Reports", com.example.doodhsethu.R.drawable.ic_assessment, "reports")
 

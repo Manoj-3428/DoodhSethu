@@ -22,6 +22,13 @@ class MilkCollectionRepository(private val context: Context) {
     private val firestore = FirebaseFirestore.getInstance()
     private val authViewModel = AuthViewModel()
     
+    // Real-time sync state
+    private var isRealTimeSyncActive = false
+    private var realTimeSyncJob: kotlinx.coroutines.Job? = null
+    
+    // Callback for UI updates
+    private var onDataChangedCallback: (() -> Unit)? = null
+    
     // Get current user ID for Firestore operations
     private fun getCurrentUserId(): String? {
         return authViewModel.getStoredUser(context)?.userId
@@ -343,5 +350,199 @@ class MilkCollectionRepository(private val context: Context) {
         } catch (e: Exception) {
             android.util.Log.e("MilkCollectionRepository", "Error in syncLocalWithFirestore: ${e.message}")
         }
+    }
+    
+    /**
+     * Set callback for data changes
+     */
+    fun setOnDataChangedCallback(callback: () -> Unit) {
+        onDataChangedCallback = callback
+    }
+    
+    /**
+     * Start real-time sync with Firestore
+     */
+    fun startRealTimeSync() {
+        if (isRealTimeSyncActive) {
+            android.util.Log.d("MilkCollectionRepository", "Real-time sync already active")
+            return
+        }
+        
+        isRealTimeSyncActive = true
+        realTimeSyncJob = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            try {
+                android.util.Log.d("MilkCollectionRepository", "Starting real-time sync with Firestore")
+                
+                val userId = getCurrentUserId()
+                if (userId == null) {
+                    android.util.Log.e("MilkCollectionRepository", "Cannot start real-time sync: User not authenticated")
+                    return@launch
+                }
+                
+                // Set up real-time listener for all milk collection data
+                firestore.collection("users")
+                    .document(userId)
+                    .collection("milk-collection")
+                    .addSnapshotListener { snapshot, error ->
+                        if (error != null) {
+                            android.util.Log.e("MilkCollectionRepository", "Real-time sync error: ${error.message}")
+                            return@addSnapshotListener
+                        }
+                        
+                        if (snapshot != null) {
+                            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                                try {
+                                    // Process real-time updates
+                                    processRealTimeUpdates(snapshot)
+                                } catch (e: Exception) {
+                                    android.util.Log.e("MilkCollectionRepository", "Error processing real-time updates: ${e.message}")
+                                }
+                            }
+                        }
+                    }
+                
+                android.util.Log.d("MilkCollectionRepository", "Real-time sync listener established")
+            } catch (e: Exception) {
+                android.util.Log.e("MilkCollectionRepository", "Error starting real-time sync: ${e.message}")
+                isRealTimeSyncActive = false
+            }
+        }
+    }
+    
+    /**
+     * Stop real-time sync
+     */
+    fun stopRealTimeSync() {
+        if (!isRealTimeSyncActive) {
+            return
+        }
+        
+        isRealTimeSyncActive = false
+        realTimeSyncJob?.cancel()
+        realTimeSyncJob = null
+        android.util.Log.d("MilkCollectionRepository", "Real-time sync stopped")
+    }
+    
+    /**
+     * Process real-time updates from Firestore
+     */
+    private suspend fun processRealTimeUpdates(snapshot: com.google.firebase.firestore.QuerySnapshot) = withContext(Dispatchers.IO) {
+        try {
+            android.util.Log.d("MilkCollectionRepository", "Processing real-time updates")
+            
+            val userId = getCurrentUserId()
+            if (userId == null) {
+                android.util.Log.e("MilkCollectionRepository", "Cannot process updates: User not authenticated")
+                return@withContext
+            }
+            
+            // Process each date document
+            for (dateDoc in snapshot.documents) {
+                val date = dateDoc.id
+                android.util.Log.d("MilkCollectionRepository", "Processing date: $date")
+                
+                // Get farmers collection for this date
+                val farmersSnapshot = dateDoc.reference.collection("farmers").get().await()
+                
+                for (farmerDoc in farmersSnapshot.documents) {
+                    val farmerId = farmerDoc.id
+                    val data = farmerDoc.data
+                    
+                    if (data != null) {
+                        // Convert Firestore data to local milk collections
+                        val milkCollections = convertFirestoreDataToMilkCollections(data, farmerId, date)
+                        
+                        // Update local storage
+                        for (milkCollection in milkCollections) {
+                            try {
+                                // Check if collection already exists
+                                val existingCollection = milkCollectionDao.getMilkCollectionById(milkCollection.id)
+                                if (existingCollection == null) {
+                                    // Insert new collection
+                                    milkCollectionDao.insertMilkCollection(milkCollection.copy(isSynced = true))
+                                    android.util.Log.d("MilkCollectionRepository", "Added new milk collection from real-time sync: ${milkCollection.farmerName} - ${milkCollection.collectedAt}")
+                                } else {
+                                    // Update existing collection
+                                    milkCollectionDao.updateMilkCollection(milkCollection.copy(isSynced = true))
+                                    android.util.Log.d("MilkCollectionRepository", "Updated milk collection from real-time sync: ${milkCollection.farmerName} - ${milkCollection.collectedAt}")
+                                }
+                            } catch (e: Exception) {
+                                android.util.Log.e("MilkCollectionRepository", "Error updating local storage: ${e.message}")
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Notify UI of data changes
+            onDataChangedCallback?.invoke()
+            
+        } catch (e: Exception) {
+            android.util.Log.e("MilkCollectionRepository", "Error processing real-time updates: ${e.message}")
+        }
+    }
+    
+    /**
+     * Convert Firestore data to milk collections
+     */
+    private fun convertFirestoreDataToMilkCollections(data: Map<String, Any>, farmerId: String, date: String): List<MilkCollection> {
+        val collections = mutableListOf<MilkCollection>()
+        
+        try {
+            val farmerName = data["farmerName"] as? String ?: ""
+            val amMilk = data["am_milk"] as? Double ?: 0.0
+            val amFat = data["am_fat"] as? Double ?: 0.0
+            val amPrice = data["am_price"] as? Double ?: 0.0
+            val pmMilk = data["pm_milk"] as? Double ?: 0.0
+            val pmFat = data["pm_fat"] as? Double ?: 0.0
+            val pmPrice = data["pm_price"] as? Double ?: 0.0
+            
+            // Parse date
+            val dateFormat = java.text.SimpleDateFormat("dd-MM-yyyy", java.util.Locale.getDefault())
+            val parsedDate = dateFormat.parse(date) ?: Date()
+            
+            // Create AM collection if exists
+            if (amMilk > 0) {
+                collections.add(
+                    MilkCollection(
+                        id = "${farmerId}_${date}_AM",
+                        farmerId = farmerId,
+                        farmerName = farmerName,
+                        quantity = amMilk,
+                        fatPercentage = amFat,
+                        basePrice = amPrice / amMilk,
+                        totalPrice = amPrice,
+                        session = "AM",
+                        collectedBy = getCurrentUserId() ?: "",
+                        collectedAt = parsedDate,
+                        isSynced = true
+                    )
+                )
+            }
+            
+            // Create PM collection if exists
+            if (pmMilk > 0) {
+                collections.add(
+                    MilkCollection(
+                        id = "${farmerId}_${date}_PM",
+                        farmerId = farmerId,
+                        farmerName = farmerName,
+                        quantity = pmMilk,
+                        fatPercentage = pmFat,
+                        basePrice = pmPrice / pmMilk,
+                        totalPrice = pmPrice,
+                        session = "PM",
+                        collectedBy = getCurrentUserId() ?: "",
+                        collectedAt = parsedDate,
+                        isSynced = true
+                    )
+                )
+            }
+            
+        } catch (e: Exception) {
+            android.util.Log.e("MilkCollectionRepository", "Error converting Firestore data: ${e.message}")
+        }
+        
+        return collections
     }
 }

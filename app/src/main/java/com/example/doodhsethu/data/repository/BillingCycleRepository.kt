@@ -8,6 +8,7 @@ import com.example.doodhsethu.ui.viewmodels.AuthViewModel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.map
 import java.util.*
 import java.util.Calendar
 import kotlinx.coroutines.CoroutineScope
@@ -42,9 +43,19 @@ class BillingCycleRepository(private val context: Context) {
 
 
 
+    // Get current user ID for Firestore operations
+    private fun getCurrentUserId(): String? {
+        return authViewModel.getStoredUser(context)?.userId
+    }
+
     // Get all billing cycles
     fun getAllBillingCycles(): Flow<List<BillingCycle>> {
-        return billingCycleDao.getAllBillingCycles()
+        val userId = getCurrentUserId()
+        return if (userId != null) {
+            billingCycleDao.getAllBillingCycles().map { cycles -> cycles.filter { it.addedBy == userId } }
+        } else {
+            kotlinx.coroutines.flow.flowOf(emptyList())
+        }
     }
 
     // Get farmer billing details for a specific farmer
@@ -72,7 +83,13 @@ class BillingCycleRepository(private val context: Context) {
 
     // Get a single billing cycle by ID
     suspend fun getBillingCycleById(billingCycleId: String): BillingCycle? {
-        return billingCycleDao.getBillingCycleById(billingCycleId)
+        val userId = getCurrentUserId()
+        val billingCycle = billingCycleDao.getBillingCycleById(billingCycleId)
+        return if (userId != null && billingCycle?.addedBy == userId) {
+            billingCycle
+        } else {
+            null
+        }
     }
 
     // Get farmer billing details by billing cycle ID
@@ -87,7 +104,12 @@ class BillingCycleRepository(private val context: Context) {
             val billingCycleId = generateBillingCycleId(startDate, endDate)
             
             // Generate billing cycle name
-        val existingCycles = billingCycleDao.getAllBillingCycles().first()
+            // IMPORTANT: Only count cycles created by the currently logged-in user
+            val existingCycles = try {
+                val userIdForNaming = getCurrentUserId()
+                val allCycles = billingCycleDao.getAllBillingCycles().first()
+                if (userIdForNaming != null) allCycles.filter { it.addedBy == userIdForNaming } else emptyList()
+            } catch (_: Exception) { emptyList() }
             val billingCycleName = generateBillingCycleName(startDate, existingCycles)
             android.util.Log.d("BillingCycleRepository", "Generated billing cycle name: $billingCycleName")
             
@@ -103,12 +125,19 @@ class BillingCycleRepository(private val context: Context) {
             android.util.Log.d("BillingCycleRepository", "Total amount for date range $startDate to $endDate: ₹$totalAmount")
             
             // Create billing cycle with consistent ID
+            val userId = getCurrentUserId()
+            if (userId == null) {
+                android.util.Log.e("BillingCycleRepository", "Cannot create billing cycle: User not authenticated")
+                throw IllegalStateException("User not authenticated")
+            }
+            
         val billingCycle = BillingCycle(
                 id = billingCycleId,
                 name = billingCycleName,
             startDate = startDate,
             endDate = endDate,
             totalAmount = totalAmount,
+                addedBy = userId,
                 createdAt = Date(),
                 isSynced = false
             )
@@ -552,7 +581,8 @@ class BillingCycleRepository(private val context: Context) {
             }
 
             // Get all billing cycles that need syncing (only unsynced ones)
-            val unsyncedBillingCycles = billingCycleDao.getUnsyncedBillingCycles()
+            val allUnsyncedBillingCycles = billingCycleDao.getUnsyncedBillingCycles()
+            val unsyncedBillingCycles = allUnsyncedBillingCycles.filter { it.addedBy == userId }
             android.util.Log.d("BillingCycleRepository", "Found ${unsyncedBillingCycles.size} unsynced billing cycles")
             
             if (unsyncedBillingCycles.isEmpty()) {
@@ -572,7 +602,7 @@ class BillingCycleRepository(private val context: Context) {
                         "name" to billingCycle.name,
                         "start_date" to com.google.firebase.Timestamp(billingCycle.startDate),
                         "end_date" to com.google.firebase.Timestamp(billingCycle.endDate),
-                        "total_amount" to billingCycle.totalAmount,
+                        "total_amount" to kotlin.math.round(billingCycle.totalAmount * 10000.0) / 10000.0,
                         "is_paid" to billingCycle.isPaid,
                         "is_active" to billingCycle.isActive,
                         "created_at" to com.google.firebase.Timestamp(billingCycle.createdAt),
@@ -595,9 +625,9 @@ class BillingCycleRepository(private val context: Context) {
                                 "billing_cycle_id" to farmerDetail.billingCycleId,
                                 "farmer_id" to farmerDetail.farmerId,
                                 "farmer_name" to farmerDetail.farmerName,
-                                "original_amount" to farmerDetail.originalAmount,
-                                "paid_amount" to farmerDetail.paidAmount,
-                                "balance_amount" to farmerDetail.balanceAmount,
+                                "original_amount" to kotlin.math.round(farmerDetail.originalAmount * 10000.0) / 10000.0,
+                                "paid_amount" to kotlin.math.round(farmerDetail.paidAmount * 10000.0) / 10000.0,
+                                "balance_amount" to kotlin.math.round(farmerDetail.balanceAmount * 10000.0) / 10000.0,
                                 "is_paid" to farmerDetail.isPaid,
                                 "payment_date" to farmerDetail.paymentDate?.let { com.google.firebase.Timestamp(it) },
                                 "is_synced" to true
@@ -702,6 +732,8 @@ class BillingCycleRepository(private val context: Context) {
                                     isPaid = cycleData?.get("is_paid") as? Boolean ?: true,
                                     isActive = cycleData?.get("is_active") as? Boolean ?: true,
                                     createdAt = (cycleData?.get("created_at") as? com.google.firebase.Timestamp)?.toDate() ?: Date(),
+                                    // Critical: mark cycles as belonging to the current user so UI filter shows them
+                                    addedBy = userId,
                                     isSynced = true
                                 )
                                     

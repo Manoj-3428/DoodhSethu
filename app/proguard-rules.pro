@@ -19,3 +19,27 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# Apache POI rules
+-keep class org.apache.poi.** { *; }
+-keep class org.apache.xmlbeans.** { *; }
+-keep class org.apache.commons.collections4.** { *; }
+-keep class org.apache.commons.codec.** { *; }
+-keep class org.apache.commons.compress.** { *; }
+
+# Keep ExcelParser classes
+-keep class com.example.doodhsethu.utils.ExcelParser { *; }
+-keep class com.example.doodhsethu.utils.ExcelParseResult { *; }
+-keep class com.example.doodhsethu.utils.SimpleExcelParser { *; }
+
+# Handle MethodHandle issues
+-dontwarn java.lang.invoke.MethodHandle
+-dontwarn java.lang.invoke.MethodHandles
+-dontwarn java.lang.invoke.MethodType
+-dontwarn org.apache.logging.log4j.**
+
+# Additional POI compatibility rules
+-dontwarn org.apache.poi.**
+-dontwarn org.apache.xmlbeans.**
+-dontwarn org.apache.commons.collections4.**
+-dontwarn commons.codec.**

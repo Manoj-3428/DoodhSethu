@@ -1,9 +1,15 @@
 package com.example.doodhsethu
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,6 +36,7 @@ import com.example.doodhsethu.ui.screens.MilkReportsScreen
 import com.example.doodhsethu.ui.viewmodels.AuthViewModel
 import com.example.doodhsethu.data.models.User
 import com.example.doodhsethu.ui.screens.BillingCycleScreen
+import com.example.doodhsethu.ui.screens.BillingCycleDetailsScreen
 import com.example.doodhsethu.ui.screens.FarmerProfileScreen
 import com.example.doodhsethu.ui.screens.UserReportsScreen
 import com.example.doodhsethu.ui.screens.FarmerDetailsScreen
@@ -44,9 +51,26 @@ import kotlinx.coroutines.withContext
 class MainActivity : ComponentActivity() {
     private lateinit var networkUtils: NetworkUtils
     
+    // Permission launcher for Bluetooth permissions
+    private val bluetoothPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val allGranted = permissions.all { it.value }
+        if (allGranted) {
+            Toast.makeText(this, "✅ Bluetooth permissions granted! Printer functionality is now available.", Toast.LENGTH_SHORT).show()
+            android.util.Log.d("MainActivity", "Bluetooth permissions granted successfully")
+        } else {
+            Toast.makeText(this, "⚠️ Some Bluetooth permissions were denied. Printer functionality will be limited.", Toast.LENGTH_LONG).show()
+            android.util.Log.w("MainActivity", "Some Bluetooth permissions were denied")
+        }
+    }
+    
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        
+        // Request Bluetooth permissions on app launch
+        requestBluetoothPermissions()
         
         // Initialize Global Network Manager
         GlobalNetworkManager.initialize(this)
@@ -74,6 +98,42 @@ class MainActivity : ComponentActivity() {
         networkUtils.stopMonitoring()
         GlobalNetworkManager.cleanup()
     }
+    
+    /**
+     * Request Bluetooth permissions on app launch for printer functionality
+     */
+    private fun requestBluetoothPermissions() {
+        val permissionsToRequest = mutableListOf<String>()
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            // Android 12+ (API 31+) - Use new Bluetooth permissions
+            permissionsToRequest.addAll(listOf(
+                Manifest.permission.BLUETOOTH_CONNECT,
+                Manifest.permission.BLUETOOTH_SCAN,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ))
+        } else {
+            // Android 11 and below - Use legacy Bluetooth permissions
+            permissionsToRequest.addAll(listOf(
+                Manifest.permission.BLUETOOTH,
+                Manifest.permission.BLUETOOTH_ADMIN,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ))
+        }
+        
+        // Check which permissions are not granted
+        val permissionsNeeded = permissionsToRequest.filter { permission ->
+            ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED
+        }
+        
+        if (permissionsNeeded.isNotEmpty()) {
+            // Request only the permissions that are not granted using modern Activity Result API
+            bluetoothPermissionLauncher.launch(permissionsNeeded.toTypedArray())
+        } else {
+            // All permissions already granted
+            android.util.Log.d("MainActivity", "All Bluetooth permissions already granted")
+        }
+    }
 }
 
 @Composable
@@ -81,6 +141,7 @@ fun AuthApp() {
     var isLogin by remember { mutableStateOf(true) }
     var isAuthenticated by remember { mutableStateOf(false) }
     var currentScreen by remember { mutableStateOf("milk_collection") }
+    var selectedBillingCycleId by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(false) }
     var isSessionChecked by remember { mutableStateOf(false) }  // Track if session check is complete
     var isDataRestoring by remember { mutableStateOf(false) }
@@ -252,14 +313,13 @@ fun AuthApp() {
     } else if (!isAuthenticated && isSessionChecked) {
         // Show login screen when not authenticated and session check is complete
         AuthScreen(
-            isLogin = true, // Always login mode - register temporarily disabled
-            onToggleMode = { /* Register toggle disabled */ }, // Register toggle disabled
+            isLogin = isLogin,
+            onToggleMode = { isLogin = !isLogin },
             onLogin = { userId, password ->
                 authViewModel.login(userId, password, context)
             },
             onRegister = { userId, name, password ->
-                // Register functionality temporarily disabled
-                // authViewModel.register(userId, name, password, context)
+                authViewModel.register(userId, name, password, context)
             },
             onAuthSuccess = {
                 // This will be handled by the LaunchedEffect(authState)
@@ -380,10 +440,28 @@ fun AuthApp() {
 
             
             "billing_cycles" -> {
-                BillingCycleScreen(onNavigateBack = { 
-                    currentScreen = "milk_collection"
-                    // AutoSyncManager will handle farmer profile updates
-                })
+                BillingCycleScreen(
+                    onNavigateBack = { 
+                        currentScreen = "milk_collection"
+                        // AutoSyncManager will handle farmer profile updates
+                    },
+                    onNavigateToDetails = { billingCycleId ->
+                        selectedBillingCycleId = billingCycleId
+                        currentScreen = "billing_cycle_details"
+                    }
+                )
+            }
+            
+            "billing_cycle_details" -> {
+                selectedBillingCycleId?.let { cycleId ->
+                    BillingCycleDetailsScreen(
+                        billingCycleId = cycleId,
+                        onNavigateBack = {
+                            currentScreen = "billing_cycles"
+                            selectedBillingCycleId = null
+                        }
+                    )
+                }
             }
             
 

@@ -32,13 +32,17 @@ import com.example.doodhsethu.R
 import com.example.doodhsethu.components.OfflineSyncIndicator
 import com.example.doodhsethu.components.NetworkStatusIndicator
 import com.example.doodhsethu.utils.GlobalNetworkManager
-import androidx.compose.material.icons.Icons
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.ExperimentalFoundationApi
 import com.example.doodhsethu.utils.LocalPhotoManager
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import com.example.doodhsethu.utils.FarmerExcelParser
+
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -75,6 +79,7 @@ fun DashboardScreen(
     val farmers by farmerViewModel.farmers.collectAsState()
     val isLoading by farmerViewModel.isLoading.collectAsState()
     val errorMessage by farmerViewModel.errorMessage.collectAsState()
+    val successMessage by farmerViewModel.successMessage.collectAsState()
     val isOnline by GlobalNetworkManager.getNetworkStatus().collectAsState()
     val pendingUploads by farmerViewModel.pendingUploads.collectAsState()
     
@@ -88,9 +93,79 @@ fun DashboardScreen(
     var selectedNavItem: NavigationItem by remember { mutableStateOf(NavigationItem.Home) }
     var isDrawerOpen by remember { mutableStateOf(true) }
     
+    // File picker for farmer import
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let { fileUri ->
+            android.util.Log.d("DashboardScreen", "File selected: $fileUri")
+            
+            // Check file type first
+            val fileTypeCheck = FarmerExcelParser.checkFileType(fileUri)
+            if (fileTypeCheck != null) {
+                android.widget.Toast.makeText(context, fileTypeCheck, android.widget.Toast.LENGTH_LONG).show()
+                return@let
+            }
+            
+            // Get file info
+            val contentResolver = context.contentResolver
+            val contentType = contentResolver.getType(fileUri) ?: "unknown"
+            val fileName = fileUri.toString().substringAfterLast("/")
+            
+            android.util.Log.d("DashboardScreen", "Content type: $contentType")
+            android.util.Log.d("DashboardScreen", "File name: $fileName")
+            
+            // Validate file - improved validation for XLSX and CSV files
+            val isValidFile = { uri: Uri ->
+                val type = contentResolver.getType(uri)
+                val fileName = uri.toString().lowercase()
+                
+                // Check MIME types for Excel and CSV files
+                val isValidType = type?.contains("csv") == true || 
+                                 type?.contains("text") == true ||
+                                 type?.contains("application/octet-stream") == true ||
+                                 type?.contains("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") == true ||
+                                 type?.contains("application/vnd.ms-excel") == true
+                
+                // Check file extensions
+                val isValidExtension = fileName.endsWith(".csv") || 
+                                      fileName.endsWith(".xlsx") || 
+                                      fileName.endsWith(".xls")
+                
+                // For Android content URIs, we need to be more flexible
+                val isContentUri = uri.toString().startsWith("content://")
+                
+                android.util.Log.d("DashboardScreen", "File validation - Type: $type, Extension: ${fileName.takeLast(5)}, Content URI: $isContentUri")
+                
+                isValidType || isValidExtension || isContentUri
+            }
+            
+            if (!isValidFile(fileUri)) {
+                android.widget.Toast.makeText(context, "Please select a valid CSV or Excel file (.csv, .xlsx)", android.widget.Toast.LENGTH_LONG).show()
+                return@let
+            }
+            
+            android.util.Log.d("DashboardScreen", "File validation passed, starting import...")
+            
+            // Show loading toast
+            android.widget.Toast.makeText(context, "Importing farmers from file...", android.widget.Toast.LENGTH_SHORT).show()
+            
+            // Start import process
+            farmerViewModel.importFromExcel(fileUri)
+        }
+    }
+    
     // Handle error messages
     LaunchedEffect(errorMessage) {
         errorMessage?.let { message ->
+            android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_LONG).show()
+            farmerViewModel.clearMessages()
+        }
+    }
+    
+    // Handle success messages
+    LaunchedEffect(successMessage) {
+        successMessage?.let { message ->
             android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_LONG).show()
             farmerViewModel.clearMessages()
         }
@@ -117,7 +192,18 @@ fun DashboardScreen(
                         )
                     }
                 },
-                actions = {}, // Remove milk and search icons
+                actions = {
+                    // Upload farmers from Excel/CSV
+                    IconButton(
+                        onClick = { filePickerLauncher.launch("*/*") }
+                    ) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_cloud_upload),
+                            contentDescription = "Import farmers from Excel/CSV",
+                            tint = PrimaryBlue
+                        )
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = Color.Transparent
                 )

@@ -47,13 +47,8 @@ class UserReportsViewModel(private val context: android.content.Context) : ViewM
         viewModelScope.launch {
             networkUtils.isOnline.collect { isOnline ->
                 _isOnline.value = isOnline
-                if (isOnline) {
-                    // Start real-time sync when online
-                    startRealTimeSync()
-                } else {
-                    // Stop real-time sync when offline
-                    stopRealTimeSync()
-                }
+                // Disabled real-time sync to ensure fast local data access
+                // Real-time sync causes delays when online
             }
         }
         
@@ -86,15 +81,8 @@ class UserReportsViewModel(private val context: android.content.Context) : ViewM
                     return@launch
                 }
                 
-                // If online, sync with Firestore first
-                if (networkUtils.isCurrentlyOnline()) {
-                    try {
-                        repository.loadFromFirestore()
-                    } catch (e: Exception) {
-                        android.util.Log.e("UserReportsViewModel", "Error syncing with Firestore: ${e.message}")
-                        // Continue with local data even if sync fails
-                    }
-                }
+                // Always use local storage for fast response
+                // Removed Firestore sync to ensure fast local data access
                 
                 // Get collections for this farmer
                 val collections = repository.getAllCollectionsByFarmer(farmerId)

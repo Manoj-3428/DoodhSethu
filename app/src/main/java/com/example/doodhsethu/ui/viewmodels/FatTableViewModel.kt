@@ -10,11 +10,19 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import com.example.doodhsethu.utils.FatTableUtils
+import com.example.doodhsethu.utils.ExcelParser
 import kotlin.math.roundToInt
+import android.net.Uri
+import android.content.ContentResolver
+import android.util.Log
+import com.example.doodhsethu.utils.ExcelParseResult
 
 class FatTableViewModel(context: Context) : ViewModel() {
     private val repository = FatTableRepository(context)
+    private val appContext = context
     
     init {
         // Set up callback for real-time updates
@@ -42,10 +50,12 @@ class FatTableViewModel(context: Context) : ViewModel() {
      * Priority: Local storage first, then Firestore if online
      */
     fun initializeData(isOnline: Boolean) {
+        // If already initialized and has data, don't re-initialize
         if (isInitialized && _fatTableRows.value.isNotEmpty()) {
             return
         }
         
+        // If already loading, don't start another initialization
         if (_isLoading.value) {
             return
         }
@@ -53,36 +63,46 @@ class FatTableViewModel(context: Context) : ViewModel() {
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                // Always load from local storage first
-                var rows = repository.getAllFatRows()
-                
-                // If online, handle offline-to-online transition properly
-                if (isOnline) {
-                    try {
-                        // First, handle any offline entries that need to be synced
-                        repository.handleOfflineToOnlineSync()
-                        
-                        // Then do a complete sync
-                        repository.syncWithFirestore()
-                        
-                        // Start real-time sync for immediate updates
-                        repository.startRealTimeSync()
-                        
-                        rows = repository.getAllFatRows()
-                    } catch (e: Exception) {
-                        // Continue with local data if Firestore sync fails
-                        _errorMessage.value = "Using local data. Sync failed: ${e.message}"
+                // Use timeout to prevent hanging
+                withTimeoutOrNull(30000) { // 30 second timeout
+                    // Always load from local storage first
+                    var rows = repository.getAllFatRows()
+                    
+                    // If online, handle offline-to-online transition properly
+                    if (isOnline) {
+                        try {
+                            // First, handle any offline entries that need to be synced
+                            repository.handleOfflineToOnlineSync()
+                            
+                            // Then do a complete sync
+                            repository.syncWithFirestore()
+                            
+                            // Start real-time sync for immediate updates
+                            repository.startRealTimeSync()
+                            
+                            rows = repository.getAllFatRows()
+                        } catch (e: Exception) {
+                            // Continue with local data if Firestore sync fails
+                            _errorMessage.value = "Using local data. Sync failed: ${e.message}"
+                        }
+                    } else {
+                        // Stop real-time sync if offline
+                        repository.stopRealTimeSync()
                     }
-                } else {
-                    // Stop real-time sync if offline
-                    repository.stopRealTimeSync()
+                    
+                    _fatTableRows.value = FatTableUtils.sortFatRanges(rows)
+                    isInitialized = true
+                } ?: run {
+                    // Timeout occurred
+                    _errorMessage.value = "Operation timed out. Using local data."
+                    val rows = repository.getAllFatRows()
+                    _fatTableRows.value = FatTableUtils.sortFatRanges(rows)
+                    isInitialized = true
                 }
-                
-                _fatTableRows.value = FatTableUtils.sortFatRanges(rows)
-                isInitialized = true
             } catch (e: Exception) {
                 _errorMessage.value = "Failed to load fat table: ${e.message}"
             } finally {
+                // Always ensure loading state is cleared
                 _isLoading.value = false
             }
         }
@@ -330,6 +350,13 @@ class FatTableViewModel(context: Context) : ViewModel() {
         _errorMessage.value = null
         _successMessage.value = null
     }
+    
+    /**
+     * Force clear loading state (for debugging)
+     */
+    fun clearLoadingState() {
+        _isLoading.value = false
+    }
 
     /**
      * Force refresh data (for testing or manual sync)
@@ -361,19 +388,122 @@ class FatTableViewModel(context: Context) : ViewModel() {
     fun handleOfflineToOnlineTransition() {
         viewModelScope.launch {
             try {
-                // Handle any offline entries that need to be synced (background operation)
-                repository.handleOfflineToOnlineSync()
-                
-                // Start real-time sync for immediate updates
-                repository.startRealTimeSync()
-                
-                // Then refresh the UI without showing loader
-                val rows = repository.getAllFatRows()
-                _fatTableRows.value = FatTableUtils.sortFatRanges(rows)
-                _successMessage.value = "Offline changes synced successfully!"
+                // Use timeout to prevent hanging
+                withTimeoutOrNull(20000) { // 20 second timeout
+                    // Handle any offline entries that need to be synced (background operation)
+                    repository.handleOfflineToOnlineSync()
+                    
+                    // Start real-time sync for immediate updates
+                    repository.startRealTimeSync()
+                    
+                    // Then refresh the UI without showing loader
+                    val rows = repository.getAllFatRows()
+                    _fatTableRows.value = FatTableUtils.sortFatRanges(rows)
+                    _successMessage.value = "Offline changes synced successfully!"
+                } ?: run {
+                    // Timeout occurred
+                    _errorMessage.value = "Sync timed out. Using local data."
+                    val rows = repository.getAllFatRows()
+                    _fatTableRows.value = FatTableUtils.sortFatRanges(rows)
+                }
                 
             } catch (e: Exception) {
                 _errorMessage.value = "Failed to sync offline changes: ${e.message}"
+            } finally {
+                // Ensure loading state is cleared after offline-to-online transition
+                _isLoading.value = false
+            }
+        }
+    }
+    
+    /**
+     * Sync unsynced entries when coming back online
+     * This method can be called manually to sync any unsynced entries
+     */
+    fun syncUnsyncedEntries(isOnline: Boolean) {
+        if (!isOnline) {
+            _errorMessage.value = "Cannot sync: No internet connection"
+            return
+        }
+        
+        viewModelScope.launch {
+            try {
+                val unsyncedRows = repository.getUnsyncedFatRows()
+                if (unsyncedRows.isNotEmpty()) {
+                    _successMessage.value = "Syncing ${unsyncedRows.size} unsynced entries..."
+                    
+                    // Use the offline-to-online sync method
+                    repository.handleOfflineToOnlineSync()
+                    
+                    // Refresh UI
+                    refreshUI()
+                    
+                    _successMessage.value = "Successfully synced ${unsyncedRows.size} entries!"
+                } else {
+                    _successMessage.value = "All entries are already synced"
+                }
+            } catch (e: Exception) {
+                _errorMessage.value = "Failed to sync unsynced entries: ${e.message}"
+            }
+        }
+    }
+    
+    /**
+     * Import FAT table data from Excel file
+     */
+    fun importFromExcel(fileUri: Uri) {
+        viewModelScope.launch {
+            _isLoading.value = true
+            _errorMessage.value = null
+            
+            try {
+                val contentResolver = appContext.contentResolver
+                
+                // Parse Excel or CSV file using the new method
+                val parseResult = ExcelParser.parseFatTableFile(fileUri, contentResolver)
+                
+                when (parseResult) {
+                    is ExcelParseResult.Success -> {
+                        val fatRows = parseResult.fatRows
+                        
+                        // Validate imported data
+                        if (fatRows.isEmpty()) {
+                            _errorMessage.value = "No valid data found in file"
+                            return@launch
+                        }
+                        
+                        // Check for overlapping ranges
+                        val sortedRows = fatRows.sortedBy { it.from }
+                        for (i in 0 until sortedRows.size - 1) {
+                            if (sortedRows[i].to >= sortedRows[i + 1].from) {
+                                _errorMessage.value = "Error: Overlapping fat ranges detected. Please check your data."
+                                return@launch
+                            }
+                        }
+                        
+                        // Replace existing data with imported data (this is now non-blocking)
+                        repository.replaceAllFatRows(fatRows)
+                        
+                        // Refresh UI immediately
+                        refreshUI()
+                        
+                        _successMessage.value = "Successfully imported ${fatRows.size} FAT table entries from file"
+                        
+                        Log.d("FatTableViewModel", "Imported ${fatRows.size} FAT entries from file")
+                    }
+                    
+                    is ExcelParseResult.Error -> {
+                        _errorMessage.value = parseResult.message
+                        Log.e("FatTableViewModel", "File import error: ${parseResult.message}")
+                    }
+                }
+                
+            } catch (e: Exception) {
+                _errorMessage.value = "Error importing file: ${e.message}"
+                android.util.Log.e("FatTableViewModel", "File import exception: ${e.message}")
+            } finally {
+                // Always clear loading state immediately after import
+                _isLoading.value = false
             }
         }
     }

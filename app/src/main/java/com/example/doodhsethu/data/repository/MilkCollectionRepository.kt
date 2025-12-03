@@ -215,32 +215,32 @@ class MilkCollectionRepository(private val context: Context) {
             "updated_at" to Date()
         )
         
-        // Update session-specific data based on AM/PM
+        // Update session-specific data based on AM/PM (rounded to 4 decimal places)
         if (milkCollection.session.equals("AM", ignoreCase = true)) {
-            firestoreData["am_milk"] = milkCollection.quantity
-            firestoreData["am_fat"] = milkCollection.fatPercentage
-            firestoreData["am_price"] = milkCollection.totalPrice
+            firestoreData["am_milk"] = kotlin.math.round(milkCollection.quantity * 10000.0) / 10000.0
+            firestoreData["am_fat"] = kotlin.math.round(milkCollection.fatPercentage * 10000.0) / 10000.0
+            firestoreData["am_price"] = kotlin.math.round(milkCollection.totalPrice * 10000.0) / 10000.0
             
-            // Keep existing PM data if available
+            // Keep existing PM data if available (rounded to 4 decimal places)
             if (existingData != null) {
-                firestoreData["pm_milk"] = existingData["pm_milk"] ?: 0.0
-                firestoreData["pm_fat"] = existingData["pm_fat"] ?: 0.0
-                firestoreData["pm_price"] = existingData["pm_price"] ?: 0.0
+                firestoreData["pm_milk"] = kotlin.math.round(((existingData["pm_milk"] as? Double) ?: 0.0) * 10000.0) / 10000.0
+                firestoreData["pm_fat"] = kotlin.math.round(((existingData["pm_fat"] as? Double) ?: 0.0) * 10000.0) / 10000.0
+                firestoreData["pm_price"] = kotlin.math.round(((existingData["pm_price"] as? Double) ?: 0.0) * 10000.0) / 10000.0
             } else {
                 firestoreData["pm_milk"] = 0.0
                 firestoreData["pm_fat"] = 0.0
                 firestoreData["pm_price"] = 0.0
             }
         } else {
-            firestoreData["pm_milk"] = milkCollection.quantity
-            firestoreData["pm_fat"] = milkCollection.fatPercentage
-            firestoreData["pm_price"] = milkCollection.totalPrice
+            firestoreData["pm_milk"] = kotlin.math.round(milkCollection.quantity * 10000.0) / 10000.0
+            firestoreData["pm_fat"] = kotlin.math.round(milkCollection.fatPercentage * 10000.0) / 10000.0
+            firestoreData["pm_price"] = kotlin.math.round(milkCollection.totalPrice * 10000.0) / 10000.0
             
-            // Keep existing AM data if available
+            // Keep existing AM data if available (rounded to 4 decimal places)
             if (existingData != null) {
-                firestoreData["am_milk"] = existingData["am_milk"] ?: 0.0
-                firestoreData["am_fat"] = existingData["am_fat"] ?: 0.0
-                firestoreData["am_price"] = existingData["am_price"] ?: 0.0
+                firestoreData["am_milk"] = kotlin.math.round(((existingData["am_milk"] as? Double) ?: 0.0) * 10000.0) / 10000.0
+                firestoreData["am_fat"] = kotlin.math.round(((existingData["am_fat"] as? Double) ?: 0.0) * 10000.0) / 10000.0
+                firestoreData["am_price"] = kotlin.math.round(((existingData["am_price"] as? Double) ?: 0.0) * 10000.0) / 10000.0
             } else {
                 firestoreData["am_milk"] = 0.0
                 firestoreData["am_fat"] = 0.0
@@ -256,9 +256,9 @@ class MilkCollectionRepository(private val context: Context) {
         val amPrice = firestoreData["am_price"] as Double
         val pmPrice = firestoreData["pm_price"] as Double
         
-        firestoreData["total_milk"] = amMilk + pmMilk
-        firestoreData["total_fat"] = if (amMilk + pmMilk > 0) ((amMilk * amFat + pmMilk * pmFat) / (amMilk + pmMilk)) else 0.0
-        firestoreData["total_amount"] = amPrice + pmPrice
+        firestoreData["total_milk"] = kotlin.math.round((amMilk + pmMilk) * 10000.0) / 10000.0
+        firestoreData["total_fat"] = if (amMilk + pmMilk > 0) kotlin.math.round(((amMilk * amFat + pmMilk * pmFat) / (amMilk + pmMilk)) * 10000.0) / 10000.0 else 0.0
+        firestoreData["total_amount"] = kotlin.math.round((amPrice + pmPrice) * 10000.0) / 10000.0
         
         // Save to Firestore using merge to update only specific fields
         farmerDoc.set(firestoreData, com.google.firebase.firestore.SetOptions.merge()).await()

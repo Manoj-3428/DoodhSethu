@@ -2,6 +2,7 @@ package com.example.doodhsethu.ui.screens
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -30,6 +31,10 @@ import com.example.doodhsethu.ui.viewmodels.BillingCycleViewModelFactory
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import android.widget.Toast
+import com.example.doodhsethu.utils.PrinterManager
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -38,13 +43,19 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BillingCycleScreen(
-    onNavigateBack: () -> Unit
+    onNavigateBack: () -> Unit,
+    onNavigateToDetails: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
     val viewModel: BillingCycleViewModel = viewModel(
         factory = BillingCycleViewModelFactory(context)
     )
     val isOnline by GlobalNetworkManager.getNetworkStatus().collectAsState()
+    val scope = rememberCoroutineScope()
+    
+    // Print dialog state
+    var showPrintDialog by remember { mutableStateOf(false) }
+    var cycleToPrint by remember { mutableStateOf<com.example.doodhsethu.data.models.BillingCycle?>(null) }
     
     val billingCycles by viewModel.billingCycles.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
@@ -290,6 +301,13 @@ fun BillingCycleScreen(
                             farmerDetails = farmerDetails,
                             onDeleteClick = { cycleToDelete ->
                                 showDeleteConfirmation = cycleToDelete
+                            },
+                            onCardClick = { cycleId ->
+                                onNavigateToDetails(cycleId)
+                            },
+                            onPrintClick = { cycle ->
+                                cycleToPrint = cycle
+                                showPrintDialog = true
                             }
                         )
                     }
@@ -520,13 +538,160 @@ fun BillingCycleScreen(
             }
         )
     }
+    
+    // Print Confirmation Dialog
+    if (showPrintDialog && cycleToPrint != null) {
+        AlertDialog(
+            onDismissRequest = { 
+                showPrintDialog = false
+                cycleToPrint = null
+            },
+            title = {
+                Text(
+                    text = "Print Billing Cycle Summary",
+                    fontFamily = PoppinsFont,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    color = PrimaryBlue
+                )
+            },
+            text = {
+                Text(
+                    text = "Do you want to print the billing cycle summary for '${cycleToPrint?.name}'?",
+                    fontFamily = PoppinsFont,
+                    fontSize = 14.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showPrintDialog = false
+                        cycleToPrint?.let { cycle ->
+                            scope.launch {
+                                try {
+                                    val farmerDetails = farmerDetailsMap[cycle.id] ?: emptyList()
+                                    val dateFormat = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+                                    
+                                    val receiptContent = buildString {
+                                        // Header - match daily milk receipt lines (32 chars)
+                                        appendLine("================================")
+                                        appendLine("      BILLING CYCLE SUMMARY")
+                                        appendLine("================================")
+                                        appendLine()
+                                        appendLine("Period: ${dateFormat.format(cycle.startDate)} - ${dateFormat.format(cycle.endDate)}")
+                                        appendLine("Date: ${SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date())}")
+                                        appendLine("Time: ${SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())}")
+                                        appendLine()
+                                        
+                                        // Filter out farmers with 0 amount and sort by ID
+                                        val validFarmers = farmerDetails
+                                            .filter { it.originalAmount > 0.0 }
+                                            .sortedBy { it.farmerId.toIntOrNull() ?: Int.MAX_VALUE }
+                                        
+                                        if (validFarmers.isNotEmpty()) {
+                                            // Table header with larger spacing
+                                            appendLine("Farmer ID        Amount")
+                                            
+                                            // Farmer entries (sorted by ID, no currency symbol)
+                                            validFarmers.forEach { farmer ->
+                                                val farmerId = farmer.farmerId
+                                                val amount = String.format(Locale.getDefault(), "%.2f", farmer.originalAmount)
+                                                appendLine("$farmerId           $amount")
+                                            }
+                                            
+                                            appendLine("Grand Total: ${String.format(Locale.getDefault(), "%.2f", cycle.totalAmount)}")
+                                        } else {
+                                            appendLine("No farmers with amounts to display")
+                                        }
+                                        
+                                        appendLine("================================")
+                                    }
+                                    
+                                    // Print to physical printer or show in toast for testing
+                                    val printerManager = PrinterManager(context)
+                                    
+                                    // Try to print (permissions should already be requested at app launch)
+                                    if (printerManager.isBluetoothAvailable() && printerManager.hasBluetoothPermissions()) {
+                                        try {
+                                            // Try to connect to a paired printer
+                                            val pairedDevices = printerManager.getPairedDevices()
+                                            val printerDevice = pairedDevices.find { 
+                                                it.name?.contains("Printer", ignoreCase = true) == true || 
+                                                it.name?.contains("POS", ignoreCase = true) == true ||
+                                                it.name?.contains("Thermal", ignoreCase = true) == true
+                                            }
+                                            
+                                            if (printerDevice != null && printerManager.connectToPrinter(printerDevice.address)) {
+                                                val printSuccess = printerManager.printReceipt(receiptContent)
+                                                printerManager.disconnect()
+                                                
+                                                if (printSuccess) {
+                                                    Toast.makeText(context, "🖨️ Billing cycle summary printed successfully on ${printerDevice.name}!", Toast.LENGTH_SHORT).show()
+                                                } else {
+                                                    Toast.makeText(context, "❌ Print failed. Showing summary in toast:\n\n$receiptContent", Toast.LENGTH_LONG).show()
+                                                }
+                                            } else {
+                                                Toast.makeText(context, "📱 No printer connected. Showing summary in toast:\n\n$receiptContent", Toast.LENGTH_LONG).show()
+                                            }
+                                        } catch (e: SecurityException) {
+                                            Toast.makeText(context, "🔒 Bluetooth permission error. Showing summary in toast:\n\n$receiptContent", Toast.LENGTH_LONG).show()
+                                            android.util.Log.e("BillingCyclePrint", "Bluetooth permission error: ${e.message}")
+                                        }
+                                    } else {
+                                        Toast.makeText(context, "🔵 Bluetooth not available or permissions not granted. Showing summary in toast:\n\n$receiptContent", Toast.LENGTH_LONG).show()
+                                    }
+                                    
+                                    // Always log for debugging
+                                    android.util.Log.d("BillingCyclePrint", "Summary to print:\n$receiptContent")
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "Error generating billing cycle summary: ${e.message}", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
+                        cycleToPrint = null
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = PrimaryBlue
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        text = "Print",
+                        fontFamily = PoppinsFont,
+                        color = White,
+                        fontSize = 14.sp
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { 
+                        showPrintDialog = false
+                        cycleToPrint = null
+                    },
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        text = "Cancel",
+                        fontFamily = PoppinsFont,
+                        color = Color.Gray,
+                        fontSize = 14.sp
+                    )
+                }
+            },
+            containerColor = White,
+            shape = RoundedCornerShape(16.dp)
+        )
+    }
 }
 
 @Composable
 fun BillingCycleCard(
     cycle: com.example.doodhsethu.data.models.BillingCycle,
     farmerDetails: List<com.example.doodhsethu.data.models.FarmerBillingDetail> = emptyList(),
-    onDeleteClick: (com.example.doodhsethu.data.models.BillingCycle) -> Unit
+    onDeleteClick: (com.example.doodhsethu.data.models.BillingCycle) -> Unit,
+    onCardClick: (String) -> Unit = {},
+    onPrintClick: (com.example.doodhsethu.data.models.BillingCycle) -> Unit = {}
 ) {
     val dateFormat = SimpleDateFormat("dd MMM yyyy", Locale.getDefault())
     val daysCount =
@@ -535,9 +700,11 @@ fun BillingCycleCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 8.dp),
+            .padding(vertical = 8.dp)
+            .clickable { onCardClick(cycle.id) },
         shape = RoundedCornerShape(12.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFFFFFFF))
     ) {
         Column(
             modifier = Modifier.padding(16.dp)
@@ -615,12 +782,26 @@ fun BillingCycleCard(
                     )
                 }
                 
-                IconButton(onClick = { onDeleteClick(cycle) }) {
-                    Icon(
-                        painter = painterResource(id = com.example.doodhsethu.R.drawable.ic_delete),
-                        contentDescription = "Delete Billing Cycle",
-                        tint = androidx.compose.ui.graphics.Color.Red
-                    )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Print button
+                    IconButton(onClick = { onPrintClick(cycle) }) {
+                        Icon(
+                            painter = painterResource(id = com.example.doodhsethu.R.drawable.ic_print),
+                            contentDescription = "Print Billing Cycle Summary",
+                            tint = PrimaryBlue
+                        )
+                    }
+                    
+                    // Delete button
+                    IconButton(onClick = { onDeleteClick(cycle) }) {
+                        Icon(
+                            painter = painterResource(id = com.example.doodhsethu.R.drawable.ic_delete),
+                            contentDescription = "Delete Billing Cycle",
+                            tint = androidx.compose.ui.graphics.Color.Red
+                        )
+                    }
                 }
             }
         }

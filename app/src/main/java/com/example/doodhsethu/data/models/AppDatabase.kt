@@ -317,7 +317,35 @@ val MIGRATION_15_16 = object : Migration(15, 16) {
     }
 }
 
-@Database(entities = [Farmer::class, FatRangeRow::class, MilkCollection::class, User::class, BillingCycle::class, FarmerBillingDetail::class, DailyMilkCollection::class], version = 16, exportSchema = false)
+val MIGRATION_16_17 = object : Migration(16, 17) {
+    override fun migrate(database: SupportSQLiteDatabase) {
+        android.util.Log.d("Migration", "Starting MIGRATION_16_17 - Adding addedBy column to fat_table")
+        
+        try {
+            // Add addedBy column to fat_table
+            database.execSQL("ALTER TABLE fat_table ADD COLUMN addedBy TEXT NOT NULL DEFAULT ''")
+            android.util.Log.d("Migration", "Added addedBy column to fat_table")
+        } catch (e: Exception) {
+            android.util.Log.e("Migration", "Error adding addedBy column to fat_table: ${e.message}")
+        }
+    }
+}
+
+val MIGRATION_17_18 = object : Migration(17, 18) {
+    override fun migrate(database: SupportSQLiteDatabase) {
+        android.util.Log.d("Migration", "Starting MIGRATION_17_18 - Adding addedBy column to billing_cycles")
+        
+        try {
+            // Add addedBy column to billing_cycles
+            database.execSQL("ALTER TABLE billing_cycles ADD COLUMN addedBy TEXT NOT NULL DEFAULT ''")
+            android.util.Log.d("Migration", "Added addedBy column to billing_cycles")
+        } catch (e: Exception) {
+            android.util.Log.e("Migration", "Error adding addedBy column to billing_cycles: ${e.message}")
+        }
+    }
+}
+
+@Database(entities = [Farmer::class, FatRangeRow::class, MilkCollection::class, User::class, BillingCycle::class, FarmerBillingDetail::class, DailyMilkCollection::class], version = 18, exportSchema = false)
 @TypeConverters(DateConverter::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun farmerDao(): FarmerDao

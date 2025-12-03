@@ -10,6 +10,8 @@ import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import java.util.Date
 
 class FarmerRepository(private val context: Context) {
@@ -29,19 +31,41 @@ class FarmerRepository(private val context: Context) {
     }
 
     suspend fun getAllFarmers(): List<Farmer> = withContext(Dispatchers.IO) {
-        farmerDao.getAllFarmersList()
+        val userId = getCurrentUserId()
+        if (userId == null) {
+            android.util.Log.e("FarmerRepository", "Cannot get farmers: User not authenticated")
+            return@withContext emptyList()
+        }
+        farmerDao.getAllFarmersList().filter { it.addedBy == userId }
     }
 
     fun getAllFarmersFlow(): kotlinx.coroutines.flow.Flow<List<Farmer>> {
-        return farmerDao.getAllFarmers()
+        val userId = getCurrentUserId()
+        return if (userId != null) {
+            farmerDao.getAllFarmers().map { farmers -> farmers.filter { it.addedBy == userId } }
+        } else {
+            kotlinx.coroutines.flow.flowOf(emptyList())
+        }
     }
 
     suspend fun insertFarmer(farmer: Farmer) = withContext(Dispatchers.IO) {
-        farmerDao.insertFarmer(farmer)
+        val userId = getCurrentUserId()
+        if (userId == null) {
+            android.util.Log.e("FarmerRepository", "Cannot insert farmer: User not authenticated")
+            return@withContext
+        }
+        val farmerWithUser = farmer.copy(addedBy = userId)
+        farmerDao.insertFarmer(farmerWithUser)
     }
 
     suspend fun insertFarmers(farmers: List<Farmer>) = withContext(Dispatchers.IO) {
-        farmerDao.insertFarmers(farmers)
+        val userId = getCurrentUserId()
+        if (userId == null) {
+            android.util.Log.e("FarmerRepository", "Cannot insert farmers: User not authenticated")
+            return@withContext
+        }
+        val farmersWithUser = farmers.map { it.copy(addedBy = userId) }
+        farmerDao.insertFarmers(farmersWithUser)
     }
 
     suspend fun updateFarmer(farmer: Farmer) = withContext(Dispatchers.IO) {
@@ -133,15 +157,31 @@ class FarmerRepository(private val context: Context) {
     }
 
     suspend fun getFarmerById(id: String): Farmer? = withContext(Dispatchers.IO) {
-        farmerDao.getFarmerById(id)
+        val userId = getCurrentUserId()
+        if (userId == null) {
+            android.util.Log.e("FarmerRepository", "Cannot get farmer: User not authenticated")
+            return@withContext null
+        }
+        val farmer = farmerDao.getFarmerById(id)
+        if (farmer != null && farmer.addedBy == userId) farmer else null
     }
 
     suspend fun searchFarmers(query: String): List<Farmer> = withContext(Dispatchers.IO) {
-        farmerDao.searchFarmers(query)
+        val userId = getCurrentUserId()
+        if (userId == null) {
+            android.util.Log.e("FarmerRepository", "Cannot search farmers: User not authenticated")
+            return@withContext emptyList()
+        }
+        farmerDao.searchFarmers(query).filter { it.addedBy == userId }
     }
 
     suspend fun getUnsyncedFarmers(): List<Farmer> = withContext(Dispatchers.IO) {
-        farmerDao.getUnsyncedFarmers()
+        val userId = getCurrentUserId()
+        if (userId == null) {
+            android.util.Log.e("FarmerRepository", "Cannot get unsynced farmers: User not authenticated")
+            return@withContext emptyList()
+        }
+        farmerDao.getUnsyncedFarmers().filter { it.addedBy == userId }
     }
 
     suspend fun markFarmersAsSynced(ids: List<String>) = withContext(Dispatchers.IO) {
@@ -315,5 +355,118 @@ class FarmerRepository(private val context: Context) {
         }
     }
     
+    /**
+     * Replace all farmers with new data (for bulk import)
+     * Handles offline/online scenarios properly
+     */
+    suspend fun replaceAllFarmers(newFarmers: List<Farmer>) = withContext(Dispatchers.IO) {
+        try {
+            android.util.Log.d("FarmerRepository", "Replacing all farmers with ${newFarmers.size} new entries")
+            
+            // Clear existing data
+            farmerDao.deleteAllFarmers()
+            
+            // Insert new data with appropriate sync status and ownership
+            val currentUserId = getCurrentUserId() ?: ""
+            val farmersToInsert = newFarmers.map { farmer ->
+                // Attribute to current user and mark as unsynced (will sync later if online)
+                farmer.copy(synced = false, addedBy = currentUserId)
+            }
+            farmerDao.insertFarmers(farmersToInsert)
+            
+            // Try to upload to Firestore (non-blocking)
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                try {
+                    // Upload to Firestore
+                    val userId = getCurrentUserId()
+                    if (userId != null) {
+                        for (farmer in farmersToInsert) {
+                            firestore.collection("users").document(userId).collection("farmers")
+                                .document(farmer.id).set(farmer.copy(synced = true)).await()
+                        }
+                        
+                        // Mark as synced after successful upload
+                        val insertedFarmers = getAllFarmers()
+                        markFarmersAsSynced(insertedFarmers.map { it.id })
+                        
+                        android.util.Log.d("FarmerRepository", "Successfully uploaded all farmers to Firestore")
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.w("FarmerRepository", "Failed to upload to Firestore (offline?): ${e.message}")
+                    // Keep farmers as unsynced for later sync when online
+                }
+            }
+            
+            android.util.Log.d("FarmerRepository", "Successfully replaced all farmers")
+            
+        } catch (e: Exception) {
+            android.util.Log.e("FarmerRepository", "Error replacing farmers: ${e.message}")
+            throw e
+        }
+    }
+    
+    /**
+     * Add farmers with validation and sync
+     */
+    suspend fun addFarmersWithSync(farmers: List<Farmer>, isOnline: Boolean): Boolean = withContext(Dispatchers.IO) {
+        try {
+            // Validate farmers (check for duplicates)
+            val existingFarmers = getAllFarmers()
+            val existingIds = existingFarmers.map { it.id }.toSet()
+            val existingPhones = existingFarmers.map { it.phone }.toSet()
+            
+            val validFarmers = farmers.filter { farmer ->
+                // Only check if ID already exists (allow duplicate phone numbers)
+                if (existingIds.contains(farmer.id)) {
+                    android.util.Log.w("FarmerRepository", "Farmer with ID ${farmer.id} already exists, skipping")
+                    false
+                } else {
+                    true
+                }
+            }
+            
+            if (validFarmers.isEmpty()) {
+                android.util.Log.w("FarmerRepository", "No valid farmers to add (all duplicates)")
+                return@withContext false
+            }
+            
+            // Ensure imported farmers are attributed to the current user so UI filters include them
+            val currentUserId = getCurrentUserId() ?: ""
+            // Save to local storage immediately with isSynced = false
+            val newFarmers = validFarmers.map { it.copy(synced = false, addedBy = currentUserId) }
+            farmerDao.insertFarmers(newFarmers)
+            
+            // Get the inserted farmers with the correct IDs
+            val insertedFarmers = getAllFarmers().filter { farmer ->
+                newFarmers.any { it.id == farmer.id && !farmer.synced }
+            }
+            
+            // Sync to Firestore in background if online (non-blocking)
+            if (isOnline && insertedFarmers.isNotEmpty()) {
+                // Launch background coroutine for Firestore sync
+                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                    try {
+                        val userId = getCurrentUserId()
+                        if (userId != null) {
+                            for (farmer in insertedFarmers) {
+                                firestore.collection("users").document(userId).collection("farmers")
+                                    .document(farmer.id).set(farmer.copy(synced = true)).await()
+                            }
+                            markFarmersAsSynced(insertedFarmers.map { it.id })
+                            android.util.Log.d("FarmerRepository", "Successfully synced ${insertedFarmers.size} farmers to Firestore")
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.e("FarmerRepository", "Background sync failed: ${e.message}")
+                    }
+                }
+            }
+            
+            android.util.Log.d("FarmerRepository", "Successfully added ${validFarmers.size} farmers")
+            true
+        } catch (e: Exception) {
+            android.util.Log.e("FarmerRepository", "Error adding farmers: ${e.message}")
+            false
+        }
+    }
 
 } 

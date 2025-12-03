@@ -18,6 +18,8 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        
+        multiDexEnabled = true
     }
 
     buildTypes {
@@ -70,4 +72,13 @@ dependencies {
     implementation("androidx.room:room-runtime:2.6.1")
     kapt("androidx.room:room-compiler:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
+    
+    // Lightweight Excel parsing (no heavy dependencies)
+    // We'll use a simple approach that handles basic Excel files
+    
+    // Multidex support for large APK
+    implementation("androidx.multidex:multidex:2.0.1")
+    
+    // Document picker for file selection
+    implementation("androidx.activity:activity-compose:1.8.2")
 }

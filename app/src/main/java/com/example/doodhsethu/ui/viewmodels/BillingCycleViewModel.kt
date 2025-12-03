@@ -8,6 +8,7 @@ import com.example.doodhsethu.data.models.BillingCycle
 import com.example.doodhsethu.data.models.FarmerBillingDetail
 import com.example.doodhsethu.data.repository.BillingCycleRepository
 import com.example.doodhsethu.utils.FarmerProfileCalculator
+import com.example.doodhsethu.utils.TestDataCreator
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -402,6 +403,24 @@ class BillingCycleViewModel(private val context: Context) : ViewModel() {
                 android.util.Log.d("BillingCycleViewModel", "Data refreshed from real-time sync: ${updatedCycles.size} cycles")
             } catch (e: Exception) {
                 android.util.Log.e("BillingCycleViewModel", "Error refreshing data: ${e.message}")
+            }
+        }
+    }
+    
+    /**
+     * Create sample test data for development/testing
+     */
+    fun createSampleData() {
+        viewModelScope.launch {
+            try {
+                android.util.Log.d("BillingCycleViewModel", "Creating sample test data...")
+                TestDataCreator.createSampleData(context)
+                // Refresh data after creating sample data
+                delay(1000) // Wait a bit for data to be created
+                loadBillingCycles()
+                android.util.Log.d("BillingCycleViewModel", "Sample data created and refreshed")
+            } catch (e: Exception) {
+                android.util.Log.e("BillingCycleViewModel", "Error creating sample data: ${e.message}")
             }
         }
     }

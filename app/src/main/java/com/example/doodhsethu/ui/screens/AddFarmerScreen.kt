@@ -58,6 +58,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.AlertDialog
+import android.net.Uri
+import com.example.doodhsethu.utils.FarmerExcelParser
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -91,6 +93,51 @@ fun AddFarmerScreen(
     var address by remember(formKey) { mutableStateOf(editFarmer?.address ?: "") }
     var photoUri by remember(formKey) { mutableStateOf<android.net.Uri?>(null) }
     var showPhotoDialog by remember { mutableStateOf(false) }
+    
+    // File picker for bulk farmer import
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let { fileUri ->
+            android.util.Log.d("AddFarmerScreen", "File selected: $fileUri")
+            
+            // Check file type first
+            val fileTypeCheck = FarmerExcelParser.checkFileType(fileUri)
+            if (fileTypeCheck != null) {
+                android.widget.Toast.makeText(context, fileTypeCheck, android.widget.Toast.LENGTH_LONG).show()
+                return@let
+            }
+            
+            // Get file info
+            val contentResolver = context.contentResolver
+            val contentType = contentResolver.getType(fileUri) ?: "unknown"
+            val fileName = fileUri.toString().substringAfterLast("/")
+            
+            android.util.Log.d("AddFarmerScreen", "Content type: $contentType")
+            android.util.Log.d("AddFarmerScreen", "File name: $fileName")
+            
+            // Validate file
+            val isValidCSVFile = { uri: Uri ->
+                val type = contentResolver.getType(uri)
+                val fileName = uri.toString().lowercase()
+                val isValidType = type?.contains("csv") == true || 
+                                 type?.contains("text") == true ||
+                                 type?.contains("application/octet-stream") == true
+                val isValidExtension = fileName.endsWith(".csv") || fileName.endsWith(".xlsx")
+                isValidType || isValidExtension
+            }
+            
+            if (!isValidCSVFile(fileUri)) {
+                android.widget.Toast.makeText(context, "Please select a valid CSV or Excel file (.csv, .xlsx)", android.widget.Toast.LENGTH_LONG).show()
+                return@let
+            }
+            
+            android.util.Log.d("AddFarmerScreen", "File validation passed, starting import...")
+            
+            // Start import process
+            farmerViewModel.importFromExcel(fileUri)
+        }
+    }
     
     // Reset form fields when editFarmer changes or when screen is first loaded
     LaunchedEffect(editFarmer) {
@@ -197,6 +244,20 @@ fun AddFarmerScreen(
                             contentDescription = "Back",
                             tint = PrimaryBlue
                         )
+                    }
+                },
+                actions = {
+                    // Only show upload button when not editing
+                    if (editFarmer == null) {
+                        IconButton(
+                            onClick = { filePickerLauncher.launch("*/*") }
+                        ) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_cloud_upload),
+                                contentDescription = "Import farmers from Excel/CSV",
+                                tint = PrimaryBlue
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(

@@ -10,5 +10,6 @@ data class FatRangeRow(
     @ColumnInfo(name = "from") val from: Float,
     @ColumnInfo(name = "to") val to: Float,
     @ColumnInfo(name = "price") val price: Double,
+    @ColumnInfo(name = "addedBy") val addedBy: String = "",
     @ColumnInfo(name = "isSynced") val isSynced: Boolean = false
 ) 

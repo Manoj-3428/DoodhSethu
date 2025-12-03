@@ -1,0 +1,15 @@
+{
+  "name": "doodhsethu-data-export",
+  "version": "1.0.0",
+  "description": "Export Firestore data for DoodhSethu backup",
+  "main": "export_data.js",
+  "scripts": {
+    "export": "node export_data.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.0.0"
+  },
+  "keywords": ["firebase", "firestore", "export", "backup"],
+  "author": "DoodhSethu",
+  "license": "MIT"
+}

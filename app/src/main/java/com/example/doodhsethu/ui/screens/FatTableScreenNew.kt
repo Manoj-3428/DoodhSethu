@@ -1,13 +1,10 @@
 package com.example.doodhsethu.ui.screens
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.*
@@ -29,6 +26,12 @@ import com.example.doodhsethu.data.models.FatRangeRow
 import com.example.doodhsethu.utils.NetworkUtils
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
+import android.net.Uri
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import com.example.doodhsethu.utils.ExcelParser
+import android.util.Log
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -63,17 +66,21 @@ fun FatTableScreenNew(
             
             // If network changed from offline to online, handle the transition
             if (previousNetworkState == false && isOnline == true) {
+                android.util.Log.d("FatTableScreen", "Network changed from offline to online")
                 viewModel.handleOfflineToOnlineTransition()
             }
             
             // If network changed from online to offline, stop real-time sync
             if (previousNetworkState == true && isOnline == false) {
+                android.util.Log.d("FatTableScreen", "Network changed from online to offline")
                 // Real-time sync will be stopped in initializeData
             }
             
             previousNetworkState = isOnline
         } catch (e: Exception) {
             android.util.Log.e("FatTableScreen", "Initialization failed: ${e.message}")
+            // Force clear loading state if initialization fails
+            viewModel.clearLoadingState()
         }
     }
     
@@ -91,6 +98,83 @@ fun FatTableScreenNew(
     var editingIndex by remember { mutableStateOf(-1) }
     
     val snackbarHostState = remember { SnackbarHostState() }
+    
+    // Helper function to validate Excel and CSV files
+    fun isValidExcelOrCSVFile(contentType: String?, uri: Uri): Boolean {
+        val validMimeTypes = listOf(
+            // CSV MIME types
+            "text/csv",
+            "text/comma-separated-values",
+            "application/csv",
+            "text/plain", // Some systems report CSV as text/plain
+            "application/octet-stream", // Some systems report CSV as octet-stream
+            // Excel MIME types
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" // .xlsx
+        )
+        
+        // Check file extension first (most reliable)
+        val fileName = uri.lastPathSegment ?: return false
+        val validExtensions = listOf(".csv", ".xlsx")
+        val hasValidExtension = validExtensions.any { fileName.lowercase().endsWith(it) }
+        
+        if (hasValidExtension) {
+            return true
+        }
+        
+        // Check MIME type as secondary validation
+        return contentType in validMimeTypes
+    }
+    
+    // Excel/CSV file picker
+    val filePickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let { selectedUri ->
+            scope.launch {
+                try {
+                    Log.d("FatTableScreen", "File selected: $selectedUri")
+                    
+                    // Check file type and provide helpful messages
+                    val fileTypeMessage = ExcelParser.checkFileType(selectedUri)
+                    if (fileTypeMessage != null) {
+                        Log.d("FatTableScreen", "File type check failed: $fileTypeMessage")
+                        snackbarHostState.showSnackbar(fileTypeMessage)
+                        return@launch
+                    }
+                    
+                    // Get file info for logging
+                    val contentType = context.contentResolver.getType(selectedUri)
+                    val fileName = selectedUri.lastPathSegment
+                    Log.d("FatTableScreen", "Content type: $contentType")
+                    Log.d("FatTableScreen", "File name: $fileName")
+                    
+                    // Try to validate file by attempting to read it
+                    try {
+                        val inputStream = context.contentResolver.openInputStream(selectedUri)
+                        if (inputStream == null) {
+                            Log.d("FatTableScreen", "Could not open file stream")
+                            snackbarHostState.showSnackbar("Could not read the selected file")
+                            return@launch
+                        }
+                        inputStream.close()
+                        
+                        Log.d("FatTableScreen", "File validation passed, starting import...")
+                        snackbarHostState.showSnackbar("Starting file import...")
+                        viewModel.importFromExcel(selectedUri)
+                        
+                    } catch (e: Exception) {
+                        Log.d("FatTableScreen", "File validation failed: ${e.message}")
+                        snackbarHostState.showSnackbar("Could not read the selected file. Please ensure it's a valid Excel (.xlsx) or CSV file.")
+                    }
+                } catch (e: Exception) {
+                    Log.e("FatTableScreen", "Error selecting file: ${e.message}", e)
+                    snackbarHostState.showSnackbar("Error selecting file: ${e.message}")
+                }
+            }
+        } ?: run {
+            Log.d("FatTableScreen", "No file selected")
+        }
+    }
     
     // Handle messages
     LaunchedEffect(errorMessage, successMessage) {
@@ -133,6 +217,18 @@ fun FatTableScreenNew(
                         }
                     }
                 },
+                actions = {
+                    // Excel/CSV Import button
+                    IconButton(
+                        onClick = { filePickerLauncher.launch("*/*") }
+                    ) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_cloud_upload),
+                            contentDescription = "Import from Excel/CSV",
+                            tint = Color.White
+                        )
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = PrimaryBlue,
                     titleContentColor = Color.White,
@@ -171,7 +267,7 @@ fun FatTableScreenNew(
             
             // Debug info
             Text(
-                text = "Fat Table - ${rows.size} entries loaded",
+                text = "Fat Table - ${rows.size} entries loaded${if (isLoading) " (Loading...)" else ""}",
                 color = Color.Gray,
                 fontSize = 12.sp,
                 modifier = Modifier.padding(bottom = 8.dp)

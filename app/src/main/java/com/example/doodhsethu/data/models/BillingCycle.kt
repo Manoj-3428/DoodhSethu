@@ -13,6 +13,7 @@ data class BillingCycle(
     val totalAmount: Double, // Total amount paid to all farmers for this period
     val isPaid: Boolean = true, // Always true since creating billing cycle = payment made
     val isActive: Boolean = true, // True if billing cycle is within current month, false if passive
+    val addedBy: String = "", // User ID who created this billing cycle
     val createdAt: Date = Date(),
     val isSynced: Boolean = false
 )

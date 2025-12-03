@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.doodhsethu.data.models.User
 import com.example.doodhsethu.data.repository.UserRepository
+import com.example.doodhsethu.data.models.DatabaseManager
 import com.example.doodhsethu.utils.NetworkUtils
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -290,6 +291,9 @@ class AuthViewModel : ViewModel() {
                 // Clear SharedPreferences
                 clearSession(context)
                 android.util.Log.d("AuthViewModel", "SharedPreferences cleared")
+                
+                // Keep local Room tables - don't clear data on logout
+                android.util.Log.d("AuthViewModel", "Keeping local data on logout - not clearing Room database")
                 
                 // Set auth state to Idle to trigger UI update
                 _authState.value = AuthState.Idle

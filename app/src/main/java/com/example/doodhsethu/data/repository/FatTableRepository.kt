@@ -3,6 +3,7 @@ package com.example.doodhsethu.data.repository
 import android.content.Context
 import com.example.doodhsethu.data.models.DatabaseManager
 import com.example.doodhsethu.data.models.FatRangeRow
+import com.example.doodhsethu.ui.viewmodels.AuthViewModel
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -14,8 +15,13 @@ class FatTableRepository(context: Context) {
     private val db = DatabaseManager.getDatabase(context)
     private val fatTableDao = db.fatTableDao()
     private val firestore = FirebaseFirestore.getInstance()
-    private val collectionName = "fat_table"
+    private val authViewModel = AuthViewModel()
     private val appContext = context.applicationContext
+    
+    // Get current user ID for Firestore operations
+    private fun getCurrentUserId(): String? {
+        return authViewModel.getStoredUser(appContext)?.userId
+    }
     
     // Prevent concurrent sync operations
     private var isSyncing = false
@@ -61,8 +67,14 @@ class FatTableRepository(context: Context) {
             try {
                 android.util.Log.d("FatTableRepository", "Starting real-time sync with Firestore")
                 
-                // Set up real-time listener
-                firestore.collection(collectionName)
+                // Set up real-time listener with user-specific path
+                val userId = getCurrentUserId()
+                if (userId == null) {
+                    android.util.Log.e("FatTableRepository", "Cannot start real-time sync: User not authenticated")
+                    return@launch
+                }
+                
+                firestore.collection("users").document(userId).collection("fat_table")
                     .addSnapshotListener { snapshot, error ->
                         if (error != null) {
                             android.util.Log.e("FatTableRepository", "Real-time sync error: ${error.message}")
@@ -288,7 +300,12 @@ class FatTableRepository(context: Context) {
      */
     suspend fun getAllFatRows(): List<FatRangeRow> = withContext(Dispatchers.IO) {
         try {
-            fatTableDao.getAllFatRows()
+            val userId = getCurrentUserId()
+            if (userId == null) {
+                android.util.Log.e("FatTableRepository", "Cannot get fat rows: User not authenticated")
+                return@withContext emptyList()
+            }
+            fatTableDao.getAllFatRows().filter { it.addedBy == userId }
         } catch (e: Exception) {
             android.util.Log.e("FatTableRepository", "Error getting fat rows: ${e.message}")
             emptyList()
@@ -300,7 +317,13 @@ class FatTableRepository(context: Context) {
      */
     suspend fun insertFatRow(row: FatRangeRow) = withContext(Dispatchers.IO) {
         try {
-        fatTableDao.insertFatRow(row)
+            val userId = getCurrentUserId()
+            if (userId == null) {
+                android.util.Log.e("FatTableRepository", "Cannot insert fat row: User not authenticated")
+                return@withContext
+            }
+            val rowWithUser = row.copy(addedBy = userId)
+            fatTableDao.insertFatRow(rowWithUser)
             android.util.Log.d("FatTableRepository", "Inserted fat row: ${row.from}-${row.to} = ₹${row.price}")
         } catch (e: Exception) {
             android.util.Log.e("FatTableRepository", "Error inserting fat row: ${e.message}")
@@ -313,7 +336,13 @@ class FatTableRepository(context: Context) {
      */
     suspend fun insertFatRows(rows: List<FatRangeRow>) = withContext(Dispatchers.IO) {
         try {
-        fatTableDao.insertFatRows(rows)
+            val userId = getCurrentUserId()
+            if (userId == null) {
+                android.util.Log.e("FatTableRepository", "Cannot insert fat rows: User not authenticated")
+                return@withContext
+            }
+            val rowsWithUser = rows.map { it.copy(addedBy = userId) }
+            fatTableDao.insertFatRows(rowsWithUser)
             android.util.Log.d("FatTableRepository", "Inserted ${rows.size} fat rows")
         } catch (e: Exception) {
             android.util.Log.e("FatTableRepository", "Error inserting fat rows: ${e.message}")
@@ -365,7 +394,12 @@ class FatTableRepository(context: Context) {
      */
     suspend fun getUnsyncedFatRows(): List<FatRangeRow> = withContext(Dispatchers.IO) {
         try {
-            fatTableDao.getUnsyncedFatRows()
+            val userId = getCurrentUserId()
+            if (userId == null) {
+                android.util.Log.e("FatTableRepository", "Cannot get unsynced fat rows: User not authenticated")
+                return@withContext emptyList()
+            }
+            fatTableDao.getUnsyncedFatRows().filter { it.addedBy == userId }
         } catch (e: Exception) {
             android.util.Log.e("FatTableRepository", "Error getting unsynced fat rows: ${e.message}")
             emptyList()
@@ -422,7 +456,13 @@ class FatTableRepository(context: Context) {
      */
     suspend fun fetchFromFirestore(): List<FatRangeRow> = withContext(Dispatchers.IO) {
         try {
-            val snapshot = firestore.collection(collectionName).get().await()
+            val userId = getCurrentUserId()
+            if (userId == null) {
+                android.util.Log.e("FatTableRepository", "Cannot fetch from Firestore: User not authenticated")
+                return@withContext emptyList()
+            }
+            
+            val snapshot = firestore.collection("users").document(userId).collection("fat_table").get().await()
             val rows = snapshot.documents.mapNotNull { doc ->
                 val from = doc.getDouble("from")?.toFloat()
                 val to = doc.getDouble("to")?.toFloat()
@@ -467,7 +507,13 @@ class FatTableRepository(context: Context) {
                 "to" to toDouble,
                 "price" to row.price
             )
-            firestore.collection(collectionName).add(data).await()
+            val userId = getCurrentUserId()
+            if (userId == null) {
+                android.util.Log.e("FatTableRepository", "Cannot upload to Firestore: User not authenticated")
+                return@withContext
+            }
+            
+            firestore.collection("users").document(userId).collection("fat_table").add(data).await()
             android.util.Log.d("FatTableRepository", "Uploaded fat row to Firestore: ${fromDouble}-${toDouble} = ₹${row.price}")
         } catch (e: Exception) {
             android.util.Log.e("FatTableRepository", "Error uploading to Firestore: ${e.message}")
@@ -489,7 +535,7 @@ class FatTableRepository(context: Context) {
             val toDouble = roundToDecimal(roundedTo)
             
             // Find the document with matching from, to, and price values
-            val snapshot = firestore.collection(collectionName)
+            val snapshot = firestore.collection("users").document(getCurrentUserId() ?: return@withContext).collection("fat_table")
                 .whereEqualTo("from", fromDouble)
                 .whereEqualTo("to", toDouble)
                 .whereEqualTo("price", row.price)
@@ -528,7 +574,7 @@ class FatTableRepository(context: Context) {
             val toDouble = roundToDecimal(roundedTo)
             
             // Find the document with matching from, to, and price values
-            val snapshot = firestore.collection(collectionName)
+            val snapshot = firestore.collection("users").document(getCurrentUserId() ?: return@withContext).collection("fat_table")
                 .whereEqualTo("from", fromDouble)
                 .whereEqualTo("to", toDouble)
                 .whereEqualTo("price", row.price)
@@ -1422,6 +1468,53 @@ class FatTableRepository(context: Context) {
             
         } catch (e: Exception) {
             android.util.Log.e("FatTableRepository", "Error fixing Firestore precision: ${e.message}")
+        }
+    }
+    
+    /**
+     * Replace all FAT table rows with new data (for Excel import)
+     */
+    suspend fun replaceAllFatRows(newRows: List<FatRangeRow>) = withContext(Dispatchers.IO) {
+        try {
+            android.util.Log.d("FatTableRepository", "Replacing all FAT table rows with ${newRows.size} new entries")
+            
+            // Clear existing data
+            fatTableDao.deleteAllFatRows()
+            
+            // Insert new data with appropriate sync status
+            val rowsToInsert = newRows.map { row ->
+                // Mark as synced if we're offline (will be synced later when online)
+                row.copy(isSynced = false)
+            }
+            fatTableDao.insertFatRows(rowsToInsert)
+            
+            // Try to upload to Firestore (non-blocking)
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                try {
+                    // Upload to Firestore
+                    for (row in newRows) {
+                        uploadToFirestore(row)
+                    }
+                    
+                    // Mark as synced after successful upload
+                    val insertedRows = getAllFatRows()
+                    markFatRowsAsSynced(insertedRows.map { it.id })
+                    
+                    android.util.Log.d("FatTableRepository", "Successfully uploaded all rows to Firestore")
+                } catch (e: Exception) {
+                    android.util.Log.w("FatTableRepository", "Failed to upload to Firestore (offline?): ${e.message}")
+                    // Keep rows as unsynced for later sync when online
+                }
+            }
+            
+            android.util.Log.d("FatTableRepository", "Successfully replaced all FAT table rows")
+            
+            // Notify callback
+            onDataChangedCallback?.invoke()
+            
+        } catch (e: Exception) {
+            android.util.Log.e("FatTableRepository", "Error replacing FAT table rows: ${e.message}")
+            throw e
         }
     }
 } 

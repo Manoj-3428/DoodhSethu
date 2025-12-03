@@ -42,11 +42,7 @@ fun AuthForm(
     onAuthSuccess: () -> Unit = {},
     authViewModel: AuthViewModel = viewModel()
 ) {
-    // NOTE: Register functionality is temporarily disabled
-    // To re-enable: 
-    // 1. Uncomment the Register button in the toggle section
-    // 2. Uncomment the register call in MainActivity.kt
-    // 3. Remove the isLogin = true hardcoding in MainActivity.kt
+    // Register functionality is now enabled
     val context = LocalContext.current
     var username by remember { mutableStateOf("") }
     var userId by remember { mutableStateOf("") }
@@ -121,8 +117,6 @@ fun AuthForm(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Center
             ) {
-                // Register button temporarily disabled - uncomment to re-enable
-                /*
                 Text(
                     text = "Register",
                     fontSize = 18.sp,
@@ -135,15 +129,15 @@ fun AuthForm(
                 )
                 
                 Spacer(modifier = Modifier.width(40.dp))
-                */
                 
                 Text(
                     text = "Login",
                     fontSize = 18.sp,
                     fontFamily = PoppinsFont,
-                    fontWeight = FontWeight.Bold, // Always bold since register is disabled
-                    color = PrimaryBlue, // Always primary color since register is disabled
+                    fontWeight = if (isLogin) FontWeight.Bold else FontWeight.Normal,
+                    color = if (isLogin) PrimaryBlue else PrimaryBlue.copy(alpha = 0.6f),
                     modifier = Modifier
+                        .clickable { if (!isLogin) onToggleMode() }
                         .padding(horizontal = 30.dp, vertical = 16.dp)
                 )
             }
@@ -162,7 +156,29 @@ fun AuthForm(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-                // User ID field (move above Name for register)
+                // User ID field - LOGIN ONLY (register form commented out)
+                // Login: Editable User ID field
+                AuthTextField(
+                    value = userId,
+                    onValueChange = { userId = it },
+                    label = "User ID",
+                    leadingIcon = {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_person),
+                            contentDescription = "User ID",
+                            tint = PrimaryBlue,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    },
+                    placeholder = "Enter your User ID",
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Number,
+                        imeAction = ImeAction.Next
+                    )
+                )
+                
+                // COMMENTED OUT: Register form with animated transitions
+                /*
                 AnimatedContent(
                     targetState = isLogin,
                     transitionSpec = {
@@ -241,6 +257,7 @@ fun AuthForm(
                         }
                     }
                 }
+                */
                 // Username field (only for register, now below User ID)
             AnimatedContent(
                 targetState = !isLogin,
@@ -317,50 +334,38 @@ fun AuthForm(
         Spacer(modifier = Modifier.weight(1.5f))
         
         // Animated action button at bottom
-        AnimatedContent(
-            targetState = isLogin,
-            transitionSpec = {
-                slideInVertically(
-                    animationSpec = tween(600, delayMillis = 300),
-                    initialOffsetY = { it }
-                ) + fadeIn(animationSpec = tween(600, delayMillis = 300)) with slideOutVertically(
-                    animationSpec = tween(300),
-                    targetOffsetY = { it }
-                ) + fadeOut(animationSpec = tween(300))
-            }
-        ) { loginState ->
-            Button(
-                onClick = {
-                    if (loginState) {
-                            Log.d(context.packageName, "Login button pressed with userId=$userId")
-                            // Login validation
-                            if (userId.isBlank()) {
-                                Toast.makeText(context, "Please enter User ID", Toast.LENGTH_SHORT).show()
-                                return@Button
-                            }
-                            if (password.length < 4) {
-                                Toast.makeText(context, "Password must be at least 4 digits", Toast.LENGTH_SHORT).show()
-                                return@Button
-                            }
-                            authViewModel.login(userId, password, context)
-                    } else {
-                            Log.d(context.packageName, "Register button pressed with userId=$actualUserId")
-                            // Register validation
-                            if (username.isBlank()) {
-                                Toast.makeText(context, "Please enter your name", Toast.LENGTH_SHORT).show()
-                                return@Button
-                            }
-                            if (password.length < 4) {
-                                Toast.makeText(context, "Password must be at least 4 digits", Toast.LENGTH_SHORT).show()
-                                return@Button
-                            }
-                            if (actualUserId.isBlank()) {
-                                Toast.makeText(context, "Please wait for User ID generation", Toast.LENGTH_SHORT).show()
-                                return@Button
-                            }
-                            onRegister(actualUserId, username, password)
-                    }
-                },
+        Button(
+            onClick = {
+                if (isLogin) {
+                        Log.d(context.packageName, "Login button pressed with userId=$userId")
+                        // Login validation
+                        if (userId.isBlank()) {
+                            Toast.makeText(context, "Please enter User ID", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        if (password.length < 4) {
+                            Toast.makeText(context, "Password must be at least 4 digits", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        authViewModel.login(userId, password, context)
+                } else {
+                        Log.d(context.packageName, "Register button pressed with userId=$actualUserId")
+                        // Register validation
+                        if (username.isBlank()) {
+                            Toast.makeText(context, "Please enter your name", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        if (password.length < 4) {
+                            Toast.makeText(context, "Password must be at least 4 digits", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        if (actualUserId.isBlank()) {
+                            Toast.makeText(context, "Please wait for User ID generation", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        onRegister(actualUserId, username, password)
+                }
+            },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(50.dp)
@@ -379,7 +384,7 @@ fun AuthForm(
                     )
                 } else {
                     Text(
-                        text = if (loginState) "Login" else "Register",
+                        text = if (isLogin) "Login" else "Register",
                         fontSize = 16.sp,
                         fontFamily = PoppinsFont,
                         fontWeight = FontWeight.Bold,
@@ -387,7 +392,6 @@ fun AuthForm(
                     )
                 }
             }
-        }
         
         Spacer(modifier = Modifier.height(20.dp))
         }
